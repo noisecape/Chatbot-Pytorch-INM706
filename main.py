@@ -64,7 +64,7 @@ class Vocabulary:
         self.dialogs_ids = dialogs_ids
         self.idx_to_text = self.normalize_sentence(idx_to_text)
         self.word_to_idx = self.map_word_to_idx()
-        self.idx_to_word = self.map_idx_to_word()
+        self.vocab = self.map_idx_to_word()
 
     def __len__(self):
         return len(self.word_to_idx)
@@ -92,6 +92,9 @@ class Vocabulary:
     def map_word_to_idx(self):
         word_to_idx = OrderedDict()
         count_words = 0
+        pad_token = '<PAD>'
+        word_to_idx[pad_token] = count_words
+        count_words += 1
         for dialogs in self.dialogs_ids:
             for line in dialogs:
                 sentence = self.idx_to_text[line]
@@ -99,10 +102,15 @@ class Vocabulary:
                     if word not in word_to_idx:
                         word_to_idx[word] = count_words
                         count_words += 1
+        start_token = '<S>'
+        word_to_idx[start_token] = count_words
+        count_words += 1
+        end_token = '</S>'
+        word_to_idx[end_token] = count_words
+        count_words += 1
+        unknown_token = '<UNK>'
+        word_to_idx[unknown_token] = count_words
         return word_to_idx
-
-
-
 
 
 dir = os.path.join(os.curdir, 'cornell-movie-dialogs-corpus/movie_lines.txt')
@@ -115,7 +123,13 @@ pair_dialogs_idx = create_pair_dialogs(dialogs)
 vocabulary = Vocabulary(idx_to_text, dialogs)
 print('Total words counted in the vocabulary: {}'.format(vocabulary.__len__()))
 # create the dataset class to store the data
-dataset = CornellCorpus(pair_dialogs_idx, vocabulary.idx_to_text)
+dataset = CornellCorpus(pair_dialogs_idx, vocabulary, max_length=10)
+
+# check if the batch is well construncted
+dataset.__getitem__(5)
+
+# create dataloader to load batches for the training
+
 
 # vocabulary = Vocabulary(dialogs_pair) # extract and map each word from a dialog to an index.
 # data = CornellDialogs(dialogs_pair...) # wrap the dialog inside the Dataset class which subclasses Dataset from pytorch
