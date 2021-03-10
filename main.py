@@ -2,6 +2,8 @@ import re
 import os
 from collections import OrderedDict
 from dataset import CornellCorpus
+from torch.utils.data import DataLoader
+from model import Encoder, Decoder
 
 
 def get_movie_lines(path):
@@ -126,7 +128,30 @@ print('Total words counted in the vocabulary: {}'.format(vocabulary.__len__()))
 dataset = CornellCorpus(pair_dialogs_idx, vocabulary, max_length=10)
 
 # check if the batch is well construncted
-dataset.__getitem__(5)
+batch = dataset.__getitem__(5)
+
+# hyperparameters
+batch_size = 64
+hidden_size = 128
+embedding_size = 256
+epochs = 1000
+
+# init dataloader
+load_args = {'batch_size': batch_size, 'shuffle': True}
+dataloader = DataLoader(dataset.data, **load_args)
+
+# init seq2seq model, the parameters needed are
+# embedding_size -> the size of the embedding for each word
+# hidden_size -> the number of hidden neurons per unit
+# voc_size -> the size of the vocabulary to embed each word
+encoder = Encoder(embedding_size, hidden_size, vocabulary.__len__())
+decoder = Decoder(embedding_size, hidden_size, vocabulary.__len__())
+
+### TRAIN LOOP ###
+for epoch in range(epochs):
+    for id, X in enumerate(dataloader):
+        print()
+
 
 # create dataloader to load batches for the training
 
