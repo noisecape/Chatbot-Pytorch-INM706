@@ -65,10 +65,10 @@ class CornellCorpus(Dataset):
         answer = batch[1]
         question_idx = []
         answer_idx = []
-        for q_word in question.split(" "):
+        for q_word in question.strip().split(" "):
             # fill the list with the corresponding index2word mapping for the question
             question_idx.append(self.vocabulary.word_to_idx[q_word])
-        for a_word in answer.split(" "):
+        for a_word in answer.strip().split(" "):
             # fill the list with the corresponding index2word mapping for the answer
             answer_idx.append(self.vocabulary.word_to_idx[a_word])
 

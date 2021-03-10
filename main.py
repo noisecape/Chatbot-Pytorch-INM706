@@ -2,8 +2,13 @@ import re
 import os
 from collections import OrderedDict
 from dataset import CornellCorpus
+import torch
 from torch.utils.data import DataLoader
-from model import Encoder, Decoder
+from model import Encoder, Decoder, ChatbotModel
+from torch import optim
+import torch.nn as nn
+import numpy as np
+os.environ['KMP_DUPLICATE_LIB_OK']='True'
 
 
 def get_movie_lines(path):
@@ -134,11 +139,12 @@ batch = dataset.__getitem__(5)
 batch_size = 64
 hidden_size = 128
 embedding_size = 256
-epochs = 1000
+epochs = 5
+optim_parameters = {'lr': 1e-5, 'weight_decay': 1e-3}
 
 # init dataloader
 load_args = {'batch_size': batch_size, 'shuffle': True}
-dataloader = DataLoader(dataset.data, **load_args)
+dataloader = DataLoader(dataset, **load_args)
 
 # init seq2seq model, the parameters needed are
 # embedding_size -> the size of the embedding for each word
@@ -146,11 +152,46 @@ dataloader = DataLoader(dataset.data, **load_args)
 # voc_size -> the size of the vocabulary to embed each word
 encoder = Encoder(embedding_size, hidden_size, vocabulary.__len__())
 decoder = Decoder(embedding_size, hidden_size, vocabulary.__len__())
-
+model = ChatbotModel(encoder, decoder, vocabulary.__len__())
+#init the optimizer
+optim = optim.Adam(model.parameters(), **optim_parameters)
+# init loss function
+# when computing the loss you want to ignore the '<PAD>' token.
+pad_index = vocabulary.word_to_idx['<PAD>']
+criterion = nn.CrossEntropyLoss(ignore_index=pad_index)
+total_loss = 0
+epoch_history = []
+print(len(dataset.data))
 ### TRAIN LOOP ###
 for epoch in range(epochs):
+    print('Current epoch: {} / {}'.format(epoch, epochs))
+    batch_history = []
     for id, X in enumerate(dataloader):
-        print()
+        question = torch.transpose(X[0], 0, 1)
+        answer = torch.transpose(X[1], 0, 1)
+        # compute the output. Recall the output size should be (seq_len, batch_size, voc_size)
+        output = model(question, answer)
+        # don't consider the first element in all batches because it's the '<S>' token
+        output = output[1:]
+        answer = answer[1:]
+        # reshape both question and answer to the correct size for the loss function
+        output = output.reshape(-1, output.shape[2])
+        answer = answer.reshape(-1)
+        # default previous weights values
+        optim.zero_grad()
+        # compute loss to backpropagate
+        loss = criterion(output, answer)
+        # backpropagate to compute gradients
+        loss.backward()
+        # clip gradients to avoid exploding values
+        torch.nn.utils.clip_grad_norm(model.parameters(), max_norm=1)
+        optim.step()
+        batch_history.append(loss.item())
+    # add the loss here
+    avg_loss = np.sum(batch_history)/len(dataset.data)
+
+
+
 
 
 # create dataloader to load batches for the training
