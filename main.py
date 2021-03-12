@@ -10,6 +10,17 @@ import torch.nn as nn
 import numpy as np
 os.environ['KMP_DUPLICATE_LIB_OK']='True'
 
+# check cuda availability
+device = torch.device('cpu')
+if torch.cuda.is_available():
+    device = torch.device('cuda')
+
+print(device)
+
+# define the dir where to save the trained model
+save_model_dir = 'saved_models'
+if not os.path.exists(save_model_dir):
+    os.mkdir(save_model_dir)
 
 def get_movie_lines(path):
     """
@@ -22,7 +33,7 @@ def get_movie_lines(path):
     dialog_data = []
     line_to_phrase = {}
     for line in file.readlines():
-        dialog_data.append(line.split(sep=' +++$+++ '))
+        dialog_data.append(line.strip().split(sep=' +++$+++ '))
     for information in dialog_data:
         line_to_phrase[information[0]] = information[-1].replace('\n', '')
     return line_to_phrase
@@ -60,9 +71,8 @@ def create_pair_dialogs(dialogs):
             # check if either the answer or the question is empty and if that's the case don't append it.
             if question_line and answer_line:
                 question_to_answer[question_line] = answer_line
-        dialogs_pairs.append(question_to_answer)
+                dialogs_pairs.append(question_to_answer)
     return dialogs_pairs
-
 
 
 class Vocabulary:
@@ -150,9 +160,9 @@ dataloader = DataLoader(dataset, **load_args)
 # embedding_size -> the size of the embedding for each word
 # hidden_size -> the number of hidden neurons per unit
 # voc_size -> the size of the vocabulary to embed each word
-encoder = Encoder(embedding_size, hidden_size, vocabulary.__len__())
-decoder = Decoder(embedding_size, hidden_size, vocabulary.__len__())
-model = ChatbotModel(encoder, decoder, vocabulary.__len__())
+encoder = Encoder(embedding_size, hidden_size, vocabulary.__len__()).to(device)
+decoder = Decoder(embedding_size, hidden_size, vocabulary.__len__()).to(device)
+model = ChatbotModel(encoder, decoder, vocabulary.__len__()).to(device)
 #init the optimizer
 optim = optim.Adam(model.parameters(), **optim_parameters)
 # init loss function
@@ -184,11 +194,11 @@ for epoch in range(epochs):
         # backpropagate to compute gradients
         loss.backward()
         # clip gradients to avoid exploding values
-        torch.nn.utils.clip_grad_norm(model.parameters(), max_norm=1)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1)
         optim.step()
         batch_history.append(loss.item())
     # add the loss here
-    avg_loss = np.sum(batch_history)/len(dataset.data)
+    avg_loss = np.sum(batch_history)/X.shape(0)
 
 
 

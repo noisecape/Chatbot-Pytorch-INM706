@@ -9,7 +9,7 @@ class Encoder(nn.Module):
     def __init__(self, embedding_size, hidden_size, voc_len, num_layers=1):
         super(Encoder, self).__init__()
         self.embedding = nn.Embedding(voc_len, embedding_size)
-        self.lstm = nn.LSTM(embedding_size, hidden_size, num_layers=num_layers)
+        self.lstm = nn.LSTM(embedding_size, hidden_size, num_layers=num_layers, bidirectional=False)
 
     def forward(self, input_seq):
         # convert words of the sequence to embeddings
@@ -25,7 +25,7 @@ class Decoder(nn.Module):
     def __init__(self, embedding_size, hidden_size, voc_len, num_layers=1):
         super(Decoder, self).__init__()
         self.embedding = nn.Embedding(voc_len, embedding_size)
-        self.lstm = nn.LSTM(embedding_size, hidden_size, num_layers=num_layers)
+        self.lstm = nn.LSTM(embedding_size, hidden_size, num_layers=num_layers, bidirectional=False)
         self.fc_1 = nn.Linear(hidden_size, voc_len)
 
     def forward(self, x, h, c):
@@ -43,6 +43,12 @@ class Decoder(nn.Module):
         predictions = self.fc_1(output)
         # remove the 'extra' dimension
         return predictions.squeeze(0), h, c
+
+
+class Attention(nn.Module):
+
+    def __init__(self):
+        pass
 
 
 class ChatbotModel(nn.Module):
