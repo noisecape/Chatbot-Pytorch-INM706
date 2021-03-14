@@ -4,11 +4,11 @@ from collections import OrderedDict
 from dataset import CornellCorpus
 import torch
 from torch.utils.data import DataLoader
-from model import Encoder, Decoder, ChatbotModel
+from model import Encoder, Decoder, ChatbotModel, EncoderAttention, LuongAttentionDecoder, Attention
 from torch import optim
 import torch.nn as nn
 import numpy as np
-os.environ['KMP_DUPLICATE_LIB_OK']='True'
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
 
 # check cuda availability
 device = torch.device('cpu')
@@ -73,6 +73,15 @@ def create_pair_dialogs(dialogs):
                 question_to_answer[question_line] = answer_line
                 dialogs_pairs.append(question_to_answer)
     return dialogs_pairs
+
+
+def save_models(model):
+    PATH = save_model_dir + '/chatbot_model'
+    torch.save(model.state_dict(), PATH)
+
+def load_model(model):
+    PATH = save_model_dir + '/chatbot_model'
+    model.load_state_dict(torch.load(PATH))
 
 
 class Vocabulary:
@@ -150,19 +159,24 @@ batch_size = 64
 hidden_size = 128
 embedding_size = 256
 epochs = 5
-optim_parameters = {'lr': 1e-5, 'weight_decay': 1e-3}
+optim_parameters = {'lr': 1e-3, 'weight_decay': 1e-3}
 
 # init dataloader
 load_args = {'batch_size': batch_size, 'shuffle': True}
 dataloader = DataLoader(dataset, **load_args)
-
+print(dataloader.__len__())
 # init seq2seq model, the parameters needed are
 # embedding_size -> the size of the embedding for each word
 # hidden_size -> the number of hidden neurons per unit
 # voc_size -> the size of the vocabulary to embed each word
-encoder = Encoder(embedding_size, hidden_size, vocabulary.__len__()).to(device)
-decoder = Decoder(embedding_size, hidden_size, vocabulary.__len__()).to(device)
-model = ChatbotModel(encoder, decoder, vocabulary.__len__()).to(device)
+# encoder = Encoder(embedding_size, hidden_size, vocabulary.__len__()).to(device)
+# decoder = Decoder(embedding_size, hidden_size, vocabulary.__len__()).to(device)
+
+encoder = EncoderAttention(embedding_size, hidden_size, vocabulary.__len__())
+attention = Attention(hidden_size)
+decoder = LuongAttentionDecoder(embedding_size, hidden_size, vocabulary.__len__(), attention=attention)
+
+model = ChatbotModel(encoder, decoder, vocabulary.__len__(), attention=True).to(device)
 #init the optimizer
 optim = optim.Adam(model.parameters(), **optim_parameters)
 # init loss function
@@ -177,6 +191,8 @@ for epoch in range(epochs):
     print('Current epoch: {} / {}'.format(epoch, epochs))
     batch_history = []
     for id, X in enumerate(dataloader):
+        # transpose both input sentence and target sentence to access using the first dimension
+        # the the i-th word for each batch at each given time step t.
         question = torch.transpose(X[0], 0, 1)
         answer = torch.transpose(X[1], 0, 1)
         # compute the output. Recall the output size should be (seq_len, batch_size, voc_size)
@@ -197,16 +213,14 @@ for epoch in range(epochs):
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1)
         optim.step()
         batch_history.append(loss.item())
-    # add the loss here
-    avg_loss = np.sum(batch_history)/X.shape(0)
+        # print current loss every 500 processed batches
+        if id % 500 == 0:
+            print('BATCH [{}/{}], LOSS: {}'.format(id, dataloader.__len__(), loss))
+
+    avg_loss = np.sum(batch_history)/dataloader.__len__()
+
+    # visualize the loss at each epoch
+    print('EPOCHS [{}/{}], LOSS: {}'.format(epoch, epochs, avg_loss))
+save_models(model)
 
 
-
-
-
-# create dataloader to load batches for the training
-
-
-# vocabulary = Vocabulary(dialogs_pair) # extract and map each word from a dialog to an index.
-# data = CornellDialogs(dialogs_pair...) # wrap the dialog inside the Dataset class which subclasses Dataset from pytorch
-# dataloader = Dataloader() # create data loader to load the data
