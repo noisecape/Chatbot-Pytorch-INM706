@@ -26,7 +26,7 @@ class CornellCorpus(Dataset):
                 for question, answer in zip(dialog.keys(), dialog.values()):
                     q_a_pair = [self.vocabulary.idx_to_text[question], self.vocabulary.idx_to_text[answer]]
                     if q_a_pair[0] == ' ' or q_a_pair[1] == ' ':
-                        print('empty!!')
+                        print('Empty batch, discard')
                     else:
                         dataset.append(q_a_pair)
         else:
@@ -34,7 +34,7 @@ class CornellCorpus(Dataset):
                 for question, answer in zip(dialog.keys(), dialog.values()):
                     q_a_pair = [self.vocabulary.idx_to_text[question], self.vocabulary.idx_to_text[answer]]
                     if q_a_pair[0] == ' ' or q_a_pair[1] == ' ':
-                        print('empty!!')
+                        print('Empty batch, discard')
                     else:
                         dataset.append(q_a_pair)
         return dataset

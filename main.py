@@ -153,13 +153,13 @@ def train_loop():
     for id, X in enumerate(train_dataloader):
         # transpose both input sentence and target sentence to access using the first dimension
         # the the i-th word for each batch at each given time step t.
-        question = torch.transpose(X[0], 0, 1)
-        answer = torch.transpose(X[1], 0, 1)
+        question = torch.transpose(X[0].to(device), 0, 1)
+        answer = torch.transpose(X[1].to(device), 0, 1)
         # compute the output. Recall the output size should be (seq_len, batch_size, voc_size)
         output = model(question, answer)
         # don't consider the first element in all batches because it's the '<S>' token
-        output = output[1:]
-        answer = answer[1:]
+        output = output[1:].to(device)
+        answer = answer[1:].to(device)
         # reshape both question and answer to the correct size for the loss function
         output = output.reshape(-1, output.shape[2])
         answer = answer.reshape(-1)
@@ -175,6 +175,7 @@ def train_loop():
         batch_history.append(loss.item())
         # print current loss every 500 processed batches
         if id % 500 == 0:
+            path_checkpoint = os.path.join(os.curdir, 'saved_models/checkpoint.pth')
             print('BATCH [{}/{}], LOSS: {}'.format(id, train_dataloader.__len__(), loss))
     avg_loss = np.sum(batch_history) / train_dataloader.__len__()
     return avg_loss
@@ -186,18 +187,19 @@ def val_loop():
     for idx, X in enumerate(val_dataloader):
         # transpose both input sentence and target sentence to access using the first dimension
         # the the i-th word for each batch at each given time step t.
-        question = torch.transpose(X[0], 0, 1)
-        answer = torch.transpose(X[1], 0, 1)
+        question = torch.transpose(X[0].to(device), 0, 1)
+        answer = torch.transpose(X[1].to(device), 0, 1)
         # compute the output. Recall the output size should be (seq_len, batch_size, voc_size)
         output = model(question, answer)
         # don't consider the first element in all batches because it's the '<S>' token
-        output = output[1:]
-        answer = answer[1:]
+        output = output[1:].to(device)
+        answer = answer[1:].to(device)
         # reshape both question and answer to the correct size for the loss function
         output = output.reshape(-1, output.shape[2])
         answer = answer.reshape(-1)
         # compute the loss
         loss = criterion(output, answer)
+
         # keep track of the loss
         batch_history.append(loss.item())
         # print current loss every 500 processed batches
@@ -219,13 +221,11 @@ print('Total words counted in the vocabulary: {}'.format(vocabulary.__len__()))
 # create the dataset class to store the data
 train_data = CornellCorpus(pair_dialogs_idx, vocabulary, train_data=True)
 val_data = CornellCorpus(pair_dialogs_idx, vocabulary, train_data=False)
-for idx in range(train_data.__len__()):
-    print(idx, train_data.__getitem__(idx))
 
 # hyperparameters
 batch_size = 128
 hidden_size = 256
-embedding_size = 256
+embedding_size = 100
 epochs = 500
 optim_parameters = {'lr': 1e-4, 'weight_decay': 1e-3}
 
@@ -256,6 +256,7 @@ criterion = nn.CrossEntropyLoss(ignore_index=pad_index)
 epoch_history = []
 
 ### TRAIN LOOP ###
+
 for epoch in range(epochs):
     # start counting epoch time
     start_time = time.time()
@@ -265,16 +266,17 @@ for epoch in range(epochs):
     val_loss = val_loop()
     # store train and val loss for later analysis
     epoch_history.append((train_loss, val_loss))
+    torch.save({'epoch_history': epoch_history}, os.path.join())
     # end of epoch
     end_time = time.time()
     # format elapsed time
     elapsed_secs, elapsed_mins = format_time(start_time, end_time)
-    print("EPOCH [{}/{}] | Train Loss: {} | Val. Loss: {} | time: {}m {} s".format(epoch+1,
-                                                                                       epochs,
-                                                                                       train_loss,
-                                                                                       val_loss,
-                                                                                       elapsed_mins,
-                                                                                       elapsed_secs))
+    print("EPOCH [{}/{}] | Train Loss: {} | Val. Loss: {} | time: {}m {}s".format(epoch+1,
+                                                                                  epochs,
+                                                                                  train_loss,
+                                                                                  val_loss,
+                                                                                  elapsed_mins,
+                                                                                  elapsed_secs))
 # save training model.
 print('Training completed.')
 save_models(model)
