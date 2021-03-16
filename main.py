@@ -8,6 +8,7 @@ from model import Encoder, Decoder, ChatbotModel, EncoderAttention, LuongAttenti
 from torch import optim
 import torch.nn as nn
 import numpy as np
+import time
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
 
 # check cuda availability
@@ -139,58 +140,11 @@ class Vocabulary:
         return word_to_idx
 
 
-dir = os.path.join(os.curdir, 'cornell-movie-dialogs-corpus/movie_lines.txt')
-idx_to_text = get_movie_lines(dir)
-# create a list of dialogs for each movie.
-dialogs = extract_dialogs()
-# for each movie, create pairs dialogs (Q/A). This is the actual data used for training.
-pair_dialogs_idx = create_pair_dialogs(dialogs)
-# instantiate the vocabulary
-vocabulary = Vocabulary(idx_to_text, dialogs)
-print('Total words counted in the vocabulary: {}'.format(vocabulary.__len__()))
-# create the dataset class to store the data
-dataset = CornellCorpus(pair_dialogs_idx, vocabulary, max_length=10)
-
-# check if the batch is well construncted
-batch = dataset.__getitem__(5)
-
-# hyperparameters
-batch_size = 64
-hidden_size = 128
-embedding_size = 256
-epochs = 5
-optim_parameters = {'lr': 1e-3, 'weight_decay': 1e-3}
-
-# init dataloader
-load_args = {'batch_size': batch_size, 'shuffle': True}
-dataloader = DataLoader(dataset, **load_args)
-print(dataloader.__len__())
-# init seq2seq model, the parameters needed are
-# embedding_size -> the size of the embedding for each word
-# hidden_size -> the number of hidden neurons per unit
-# voc_size -> the size of the vocabulary to embed each word
-# encoder = Encoder(embedding_size, hidden_size, vocabulary.__len__()).to(device)
-# decoder = Decoder(embedding_size, hidden_size, vocabulary.__len__()).to(device)
-
-encoder = EncoderAttention(embedding_size, hidden_size, vocabulary.__len__())
-attention = Attention(hidden_size)
-decoder = LuongAttentionDecoder(embedding_size, hidden_size, vocabulary.__len__(), attention=attention)
-
-model = ChatbotModel(encoder, decoder, vocabulary.__len__(), attention=True).to(device)
-#init the optimizer
-optim = optim.Adam(model.parameters(), **optim_parameters)
-# init loss function
-# when computing the loss you want to ignore the '<PAD>' token.
-pad_index = vocabulary.word_to_idx['<PAD>']
-criterion = nn.CrossEntropyLoss(ignore_index=pad_index)
-total_loss = 0
-epoch_history = []
-print(len(dataset.data))
-### TRAIN LOOP ###
-for epoch in range(epochs):
-    print('Current epoch: {} / {}'.format(epoch, epochs))
+def train_loop():
     batch_history = []
-    for id, X in enumerate(dataloader):
+    model.train()
+    avg_loss = 0
+    for id, X in enumerate(train_dataloader):
         # transpose both input sentence and target sentence to access using the first dimension
         # the the i-th word for each batch at each given time step t.
         question = torch.transpose(X[0], 0, 1)
@@ -215,12 +169,111 @@ for epoch in range(epochs):
         batch_history.append(loss.item())
         # print current loss every 500 processed batches
         if id % 500 == 0:
-            print('BATCH [{}/{}], LOSS: {}'.format(id, dataloader.__len__(), loss))
+            print('BATCH [{}/{}], LOSS: {}'.format(id, train_dataloader.__len__(), loss))
+    avg_loss = np.sum(batch_history) / train_dataloader.__len__()
+    return avg_loss
 
-    avg_loss = np.sum(batch_history)/dataloader.__len__()
+def val_loop():
+    model.eval()
+    batch_history = []
+    avg_loss = 0
+    for idx, X in enumerate(val_dataloader):
+        # transpose both input sentence and target sentence to access using the first dimension
+        # the the i-th word for each batch at each given time step t.
+        question = torch.transpose(X[0], 0, 1)
+        answer = torch.transpose(X[1], 0, 1)
+        # compute the output. Recall the output size should be (seq_len, batch_size, voc_size)
+        output = model(question, answer)
+        # don't consider the first element in all batches because it's the '<S>' token
+        output = output[1:]
+        answer = answer[1:]
+        # reshape both question and answer to the correct size for the loss function
+        output = output.reshape(-1, output.shape[2])
+        answer = answer.reshape(-1)
+        # compute the loss
+        loss = criterion(output, answer)
+        # keep track of the loss
+        batch_history.append(loss.item())
+        # print current loss every 500 processed batches
+        if id % 500 == 0:
+            print('BATCH [{}/{}], LOSS: {}'.format(id, val_dataloader.__len__(), loss))
+    avg_loss = torch.sum(batch_history)/ val_dataloader.__len__()
+    return avg_loss
 
-    # visualize the loss at each epoch
-    print('EPOCHS [{}/{}], LOSS: {}'.format(epoch, epochs, avg_loss))
+def format_time(start, end):
+    elapsed_time = end - start
+    elapsed_mins = int(elapsed_time / 60)
+    elapsed_secs = int(elapsed_time - (elapsed_mins * 60))
+    return elapsed_secs, elapsed_mins
+
+
+dir = os.path.join(os.curdir, 'cornell-movie-dialogs-corpus/movie_lines.txt')
+idx_to_text = get_movie_lines(dir)
+# create a list of dialogs for each movie.
+dialogs = extract_dialogs()
+# for each movie, create pairs dialogs (Q/A). This is the actual data used for training.
+pair_dialogs_idx = create_pair_dialogs(dialogs)
+# instantiate the vocabulary
+vocabulary = Vocabulary(idx_to_text, dialogs)
+print('Total words counted in the vocabulary: {}'.format(vocabulary.__len__()))
+# create the dataset class to store the data
+train_data = CornellCorpus(pair_dialogs_idx, vocabulary, train_data=True)
+val_data = CornellCorpus(pair_dialogs_idx, vocabulary, train_data=False)
+# hyperparameters
+batch_size = 128
+hidden_size = 256
+embedding_size = 256
+epochs = 2000
+optim_parameters = {'lr': 1e-4, 'weight_decay': 1e-3}
+
+# init dataloader
+load_args = {'batch_size': batch_size, 'shuffle': True}
+train_dataloader = DataLoader(train_data, **load_args)
+val_dataloader = DataLoader(val_data, **load_args)
+print(train_dataloader.__len__())
+print(val_dataloader.__len__())
+# init seq2seq model, the parameters needed are
+# embedding_size -> the size of the embedding for each word
+# hidden_size -> the number of hidden neurons per unit
+# voc_size -> the size of the vocabulary to embed each word
+# encoder = Encoder(embedding_size, hidden_size, vocabulary.__len__()).to(device)
+# decoder = Decoder(embedding_size, hidden_size, vocabulary.__len__()).to(device)
+
+encoder = EncoderAttention(embedding_size, hidden_size, vocabulary.__len__())
+attention = Attention(hidden_size)
+decoder = LuongAttentionDecoder(embedding_size, hidden_size, vocabulary.__len__(), attention=attention)
+
+model = ChatbotModel(encoder, decoder, vocabulary.__len__(), attention=True).to(device)
+#init the optimizer
+optim = optim.Adam(model.parameters(), **optim_parameters)
+# init loss function
+# when computing the loss you want to ignore the '<PAD>' token.
+pad_index = vocabulary.word_to_idx['<PAD>']
+criterion = nn.CrossEntropyLoss(ignore_index=pad_index)
+epoch_history = []
+
+### TRAIN LOOP ###
+for epoch in range(epochs):
+    # start counting epoch time
+    start_time = time.time()
+    # compute train loss
+    train_loss = train_loop()
+    # compute val loss
+    val_loss = val_loop()
+    # store train and val loss for later analysis
+    epoch_history.append((train_loss, val_loss))
+    # end of epoch
+    end_time = time.time()
+    # format elapsed time
+    elapsed_secs, elapsed_mins = format_time(start_time, end_time)
+    print("EPOCH [{}/{}] | Train Loss: {} | Val. Loss: {} | time: {}m {} s".format(epoch+1,
+                                                                                       epochs,
+                                                                                       train_loss,
+                                                                                       val_loss,
+                                                                                       elapsed_mins,
+                                                                                       elapsed_secs))
+# save training model.
+print('Training completed.')
 save_models(model)
 
 

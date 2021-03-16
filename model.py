@@ -112,7 +112,7 @@ class LuongAttentionDecoder(nn.Module):
         self.embedding = nn.Embedding(voc_len, embedding_size)
         self.hidden_size = hidden_size
         self.attention = attention
-        self.lstm = nn.LSTM((self.hidden_size*2) + embedding_size, hidden_size, num_layers=1)
+        self.lstm = nn.LSTM((self.hidden_size*2) + embedding_size, hidden_size, num_layers=n_layers)
         self.fc = nn.Linear(hidden_size, voc_len)
 
     def forward(self, word, prev_hidden, prev_cell, encoder_outputs):

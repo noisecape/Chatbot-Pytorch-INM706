@@ -5,18 +5,37 @@ import re
 
 class CornellCorpus(Dataset):
 
-    def __init__(self, dialogs, vocabulary, max_length=10):
+    def __init__(self, dialogs, vocabulary, train_data=True, split_ratio=0.9, max_length=10):
         super(CornellCorpus, self).__init__()
+
         self.dialogs_pair_idx = dialogs
         self.vocabulary = vocabulary
-        self.data = self.build_dataset()
         self.max_length = max_length
-        print('Dataset built')
-        print('Dataset dimension: {}'.format(self.__len__()))
+        self.train_data = train_data
 
-    def build_dataset(self):
+        limit_index = int(len(self.dialogs_pair_idx)*split_ratio)
+
+        self.data = self.build_data(limit_index)
+        print('Dataset built')
+        print('{} Dataset dimension: {}'.format('Train' if self.train_data else 'Validation', self.__len__()))
+
+    def build_data(self, limit_index):
         dataset = []
-        for dialog in self.dialogs_pair_idx:
+        if self.train_data:
+            for dialog in self.dialogs_pair_idx[:limit_index]:
+                for question, answer in zip(dialog.keys(), dialog.values()):
+                    q_a_pair = [self.vocabulary.idx_to_text[question], self.vocabulary.idx_to_text[answer]]
+                    dataset.append(q_a_pair)
+        else:
+            for dialog in self.dialogs_pair_idx[limit_index:]:
+                for question, answer in zip(dialog.keys(), dialog.values()):
+                    q_a_pair = [self.vocabulary.idx_to_text[question], self.vocabulary.idx_to_text[answer]]
+                    dataset.append(q_a_pair)
+        return dataset
+
+    def build_valid_data(self, limit_index):
+        dataset = []
+        for dialog in self.dialogs_pair_idx[limit_index:]:
             for question, answer in zip(dialog.keys(), dialog.values()):
                 q_a_pair = [self.vocabulary.idx_to_text[question], self.vocabulary.idx_to_text[answer]]
                 dataset.append(q_a_pair)
