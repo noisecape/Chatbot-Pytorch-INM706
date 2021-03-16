@@ -4,14 +4,18 @@ import torch.nn as nn
 import numpy as np
 import torch.nn.functional as F
 
+# check cuda availability
+device = torch.device('cpu')
+if torch.cuda.is_available():
+    device = torch.device('cuda')
 
 class Encoder(nn.Module):
 
     def __init__(self, embedding_size, hidden_size, voc_len, num_layers=1):
         super(Encoder, self).__init__()
         self.hidden_size = hidden_size
-        self.embedding = nn.Embedding(voc_len, embedding_size)
-        self.lstm = nn.LSTM(embedding_size, hidden_size, num_layers=num_layers)
+        self.embedding = nn.Embedding(voc_len, embedding_size).to(device)
+        self.lstm = nn.LSTM(embedding_size, hidden_size, num_layers=num_layers).to(device)
 
     def forward(self, input_seq):
         # convert words of the sequence to embeddings
@@ -27,8 +31,8 @@ class EncoderAttention(nn.Module):
     def __init__(self, embedding_size, hidden_size, voc_len, num_layers=1):
         super(EncoderAttention, self).__init__()
         self.hidden_size = hidden_size
-        self.embedding = nn.Embedding(voc_len, embedding_size)
-        self.lstm = nn.LSTM(embedding_size, hidden_size, num_layers=num_layers, bidirectional=True)
+        self.embedding = nn.Embedding(voc_len, embedding_size).to(device)
+        self.lstm = nn.LSTM(embedding_size, hidden_size, num_layers=num_layers, bidirectional=True).to(device)
 
     def forward(self, input_seq):
         seq_embedded = self.embedding(input_seq)
@@ -47,9 +51,9 @@ class Decoder(nn.Module):
 
     def __init__(self, embedding_size, hidden_size, voc_len, num_layers=1):
         super(Decoder, self).__init__()
-        self.embedding = nn.Embedding(voc_len, embedding_size)
-        self.lstm = nn.LSTM(embedding_size, hidden_size, num_layers=num_layers, bidirectional=False)
-        self.fc_1 = nn.Linear(hidden_size, voc_len)
+        self.embedding = nn.Embedding(voc_len, embedding_size).to(device)
+        self.lstm = nn.LSTM(embedding_size, hidden_size, num_layers=num_layers, bidirectional=False).to(device)
+        self.fc_1 = nn.Linear(hidden_size, voc_len).to(device)
 
     def forward(self, x, h, c):
         """
@@ -76,7 +80,7 @@ class Attention(nn.Module):
         # hidden_size*3 is given by the fact that we concatenate the prev_hidden (of size hidden_size)
         # with the encoder states (of size hidden_size*2 because it's bidirectional)
         # the output is one because we want to output one value for each word in the batch (attention weight)
-        self.attn = nn.Linear(self.hidden_size*3, 1)
+        self.attn = nn.Linear(self.hidden_size*3, 1).to(device)
 
     def forward(self, prev_hidden, encoder_outputs):
         """
@@ -109,11 +113,11 @@ class LuongAttentionDecoder(nn.Module):
     def __init__(self, embedding_size, hidden_size, voc_len, attention, n_layers=1):
         super(LuongAttentionDecoder, self).__init__()
 
-        self.embedding = nn.Embedding(voc_len, embedding_size)
+        self.embedding = nn.Embedding(voc_len, embedding_size).to(device)
         self.hidden_size = hidden_size
         self.attention = attention
-        self.lstm = nn.LSTM((self.hidden_size*2) + embedding_size, hidden_size, num_layers=n_layers)
-        self.fc = nn.Linear(hidden_size, voc_len)
+        self.lstm = nn.LSTM((self.hidden_size*2) + embedding_size, hidden_size, num_layers=n_layers).to(device)
+        self.fc = nn.Linear(hidden_size, voc_len).to(device)
 
     def forward(self, word, prev_hidden, prev_cell, encoder_outputs):
         """

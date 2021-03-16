@@ -84,6 +84,12 @@ def load_model(model):
     PATH = save_model_dir + '/chatbot_model'
     model.load_state_dict(torch.load(PATH))
 
+def format_time(start, end):
+    elapsed_time = end - start
+    elapsed_mins = int(elapsed_time / 60)
+    elapsed_secs = int(elapsed_time - (elapsed_mins * 60))
+    return elapsed_secs, elapsed_mins
+
 
 class Vocabulary:
 
@@ -125,7 +131,7 @@ class Vocabulary:
         for dialogs in self.dialogs_ids:
             for line in dialogs:
                 sentence = self.idx_to_text[line]
-                for word in sentence.split():
+                for word in sentence.strip().split():
                     if word not in word_to_idx:
                         word_to_idx[word] = count_words
                         count_words += 1
@@ -200,12 +206,6 @@ def val_loop():
     avg_loss = torch.sum(batch_history)/ val_dataloader.__len__()
     return avg_loss
 
-def format_time(start, end):
-    elapsed_time = end - start
-    elapsed_mins = int(elapsed_time / 60)
-    elapsed_secs = int(elapsed_time - (elapsed_mins * 60))
-    return elapsed_secs, elapsed_mins
-
 
 dir = os.path.join(os.curdir, 'cornell-movie-dialogs-corpus/movie_lines.txt')
 idx_to_text = get_movie_lines(dir)
@@ -219,11 +219,14 @@ print('Total words counted in the vocabulary: {}'.format(vocabulary.__len__()))
 # create the dataset class to store the data
 train_data = CornellCorpus(pair_dialogs_idx, vocabulary, train_data=True)
 val_data = CornellCorpus(pair_dialogs_idx, vocabulary, train_data=False)
+for idx in range(train_data.__len__()):
+    print(idx, train_data.__getitem__(idx))
+
 # hyperparameters
 batch_size = 128
 hidden_size = 256
 embedding_size = 256
-epochs = 2000
+epochs = 500
 optim_parameters = {'lr': 1e-4, 'weight_decay': 1e-3}
 
 # init dataloader

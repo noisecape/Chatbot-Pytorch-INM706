@@ -25,20 +25,18 @@ class CornellCorpus(Dataset):
             for dialog in self.dialogs_pair_idx[:limit_index]:
                 for question, answer in zip(dialog.keys(), dialog.values()):
                     q_a_pair = [self.vocabulary.idx_to_text[question], self.vocabulary.idx_to_text[answer]]
-                    dataset.append(q_a_pair)
+                    if q_a_pair[0] == ' ' or q_a_pair[1] == ' ':
+                        print('empty!!')
+                    else:
+                        dataset.append(q_a_pair)
         else:
             for dialog in self.dialogs_pair_idx[limit_index:]:
                 for question, answer in zip(dialog.keys(), dialog.values()):
                     q_a_pair = [self.vocabulary.idx_to_text[question], self.vocabulary.idx_to_text[answer]]
-                    dataset.append(q_a_pair)
-        return dataset
-
-    def build_valid_data(self, limit_index):
-        dataset = []
-        for dialog in self.dialogs_pair_idx[limit_index:]:
-            for question, answer in zip(dialog.keys(), dialog.values()):
-                q_a_pair = [self.vocabulary.idx_to_text[question], self.vocabulary.idx_to_text[answer]]
-                dataset.append(q_a_pair)
+                    if q_a_pair[0] == ' ' or q_a_pair[1] == ' ':
+                        print('empty!!')
+                    else:
+                        dataset.append(q_a_pair)
         return dataset
 
     def pad_sequence(self, sequence):
@@ -72,7 +70,7 @@ class CornellCorpus(Dataset):
 
     def process_batch(self, batch):
         """
-        This function takes a batch and for both the query and the answer
+        This function takes a batch and for both query and answer
         converts each word to the relative index in the vocabulary, pads
         the sentences that are shorter than 'max_length' and append the
         <EOS> token. The <S> is inserted at the beginning of the sentence.
