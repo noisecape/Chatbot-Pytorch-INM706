@@ -3,6 +3,7 @@ import torchvision
 import torch.nn as nn
 import numpy as np
 import torch.nn.functional as F
+import numpy as np
 
 # check cuda availability
 device = torch.device('cpu')
@@ -183,7 +184,7 @@ class ChatbotModel(nn.Module):
         if self.attention:
             encoder_outputs, h_n, c_n = self.encoder(X)
             word_t = y[0]
-            for t in range(seq_len):
+            for t in range(1, seq_len):
                 output, h_n, c_n = self.decoder(word_t, h_n, c_n, encoder_outputs)
                 outputs[t] = output
                 prediction = output.argmax(1)
@@ -195,7 +196,7 @@ class ChatbotModel(nn.Module):
             # initially consider the <S> token for all the batches
             word_t = y[0]
             # compute the predictions through the decoder
-            for t in range(seq_len):
+            for t in range(1, seq_len):
                 # compute output, hidden state and cell state
                 output, h_n = self.decoder(word_t, h_n, c_n)
                 # update the data structure to hold outputs
@@ -210,6 +211,63 @@ class ChatbotModel(nn.Module):
                 word_t = y[t] if idx_choice == 0 else prediction
 
         return outputs
+
+class GreedySearch(nn.Module):
+
+    def __init__(self, encoder, decoder, voc, attention=True):
+        super(GreedySearch, self).__init__()
+        self.encoder = encoder
+        self.decoder = decoder
+        self.attention = attention
+        self.voc = voc
+
+    def forward(self, input_seq, max_length=10):
+        """
+        This function implement the Greedy search technique
+        to decode an input sequence of the user and compute the
+        most likely sequence of word of the chatbot. In this phase
+        we don't use teaching forcing because we want
+        to select only the words outputted by the decoder.
+        :param input: the input sequence typed by the user
+        :param max_length: max length of the input sequence.
+        :return predictions: the most likely sequence of words.
+        """
+        seq_len = len(input_seq)
+        outputs = torch.zeros(seq_len, 1, self.voc.__len__()).to(device)
+        if self.attention:
+            # forward pass the input through the encoder
+            encoder_outputs, h_n, c_n = self.encoder(input_seq)
+            # set the first input word of the decoder as the '<S>' token.
+            word_t = self.voc.word_to_idx['<S>']
+            word_t = torch.tensor([word_t]).to(device)
+            for t in range(1, seq_len):
+                output, h_n, c_n = self.decoder(word_t, h_n, c_n, encoder_outputs)
+                outputs[t] = output
+                prediction = output.argmax(1)
+                word_t = prediction
+                word_t = word_t.to(device)
+        else:
+            h_n, c_n = self.encoder(input_seq)
+            # set the first input word of the decoder as the '<S>' token.
+            word_t = self.voc.word_to_idx['<S>']
+            word_t = torch.tensor([word_t])
+            # compute the predictions through the decoder
+            for t in range(1, seq_len):
+                # compute output, hidden state and cell state
+                output, h_n = self.decoder(word_t, h_n, c_n)
+                # update the data structure to hold outputs
+                outputs[t] = output
+                # take the best prediction from the vocabulary.
+                # Since the dimension in (batch_size, len_voc), take the argmax of the second dimension
+                # to get the best prediction for each sentence in the batch.
+                prediction = output.argmax(1)
+                word_t = prediction
+                word_t = word_t.to(device)
+
+        return outputs
+
+
+
 
 
 

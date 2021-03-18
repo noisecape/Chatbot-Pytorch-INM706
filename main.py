@@ -4,7 +4,7 @@ from collections import OrderedDict
 from dataset import CornellCorpus
 import torch
 from torch.utils.data import DataLoader
-from model import Encoder, Decoder, ChatbotModel, EncoderAttention, LuongAttentionDecoder, Attention
+from model import Encoder, Decoder, ChatbotModel, EncoderAttention, LuongAttentionDecoder, Attention, GreedySearch
 from torch import optim
 import torch.nn as nn
 import numpy as np
@@ -53,7 +53,7 @@ def extract_dialogs():
     # extract conversations info from 'movie_conversation.txt'
     for line in file.readlines():
         line = line.split(' +++$+++ ')
-        regex = re.compile('[^a-zA-Z0-9,]')
+        regex = re.compile('[^a-zA-Z0-9.,!?]')
         line = regex.sub('', line[-1])
         line = line.split(',')
         dialog_list.append(line)
@@ -80,9 +80,11 @@ def save_models(model):
     PATH = save_model_dir + '/chatbot_model'
     torch.save(model.state_dict(), PATH)
 
+
 def load_model(model):
     PATH = save_model_dir + '/chatbot_model'
     model.load_state_dict(torch.load(PATH))
+
 
 def format_time(start, end):
     elapsed_time = end - start
@@ -98,9 +100,32 @@ class Vocabulary:
         self.idx_to_text = self.normalize_sentence(idx_to_text)
         self.word_to_idx = self.map_word_to_idx()
         self.vocab = self.map_idx_to_word()
+        # self.delete_unused_word()
 
     def __len__(self):
-        return len(self.word_to_idx)
+        return len(self.vocab)
+
+
+    ##### TO IMPLEMENT #####
+
+    #
+    # def delete_unused_word(self, min_rate=5):
+    #     for word in self.vocab.values():
+    #         word_counter = 0
+    #         if word == '<PAD>' or word == '<S>' or word == '</S>' or word == '<UNK>':
+    #             continue
+    #         for line in self.idx_to_text.values():
+    #             if word in line:
+    #                 word_counter += 1
+    #                 if word_counter > min_rate:
+    #                     break
+    #         if word_counter < min_rate:
+    #             # remove from vocabulary
+    #             print(self.__len__())
+    #             word_idx = self.word_to_idx[word]
+    #             del self.vocab[word_idx]
+    #             del self.word_to_idx[word]
+    #             print(self.__len__())
 
     def normalize_sentence(self, idx_to_text):
         normalized_idx_to_sentence = {}
@@ -108,7 +133,7 @@ class Vocabulary:
             # convert each word in the sentence to a lower case
             sentence = sentence.lower()
             # eliminate extra spaces for punctuation
-            sentence = re.sub(r"([.!?])", r" \1", sentence)
+            sentence = re.sub(r"([.,!?])", r" \1", sentence)
             # remove non-letter characters but keep regular punctuation
             sentence = re.sub(r"[^a-zA-Z.!?]+", r" ", sentence)
             normalized_idx_to_sentence[line_id] = sentence
@@ -150,7 +175,7 @@ def train_loop():
     batch_history = []
     model.train()
     avg_loss = 0
-    for id, X in enumerate(train_dataloader):
+    for idx, X in enumerate(train_dataloader):
         # transpose both input sentence and target sentence to access using the first dimension
         # the the i-th word for each batch at each given time step t.
         question = torch.transpose(X[0].to(device), 0, 1)
@@ -174,9 +199,9 @@ def train_loop():
         optim.step()
         batch_history.append(loss.item())
         # print current loss every 500 processed batches
-        if id % 500 == 0:
+        if idx % 10 == 0:
             path_checkpoint = os.path.join(os.curdir, 'saved_models/checkpoint.pth')
-            print('BATCH [{}/{}], LOSS: {}'.format(id, train_dataloader.__len__(), loss))
+            print('BATCH [{}/{}], LOSS: {}'.format(idx, train_dataloader.__len__(), loss))
     avg_loss = np.sum(batch_history) / train_dataloader.__len__()
     return avg_loss
 
@@ -203,9 +228,9 @@ def val_loop():
         # keep track of the loss
         batch_history.append(loss.item())
         # print current loss every 500 processed batches
-        if id % 500 == 0:
-            print('BATCH [{}/{}], LOSS: {}'.format(id, val_dataloader.__len__(), loss))
-    avg_loss = torch.sum(batch_history)/ val_dataloader.__len__()
+        if idx % 10 == 0:
+            print('BATCH [{}/{}], LOSS: {}'.format(idx, val_dataloader.__len__(), loss))
+    avg_loss = np.sum(batch_history) / val_dataloader.__len__()
     return avg_loss
 
 
@@ -215,18 +240,21 @@ idx_to_text = get_movie_lines(dir)
 dialogs = extract_dialogs()
 # for each movie, create pairs dialogs (Q/A). This is the actual data used for training.
 pair_dialogs_idx = create_pair_dialogs(dialogs)
+# limit pairs for batch building
+pair_dialogs_idx = pair_dialogs_idx[:100]
 # instantiate the vocabulary
 vocabulary = Vocabulary(idx_to_text, dialogs)
 print('Total words counted in the vocabulary: {}'.format(vocabulary.__len__()))
+
 # create the dataset class to store the data
 train_data = CornellCorpus(pair_dialogs_idx, vocabulary, train_data=True)
 val_data = CornellCorpus(pair_dialogs_idx, vocabulary, train_data=False)
 
 # hyperparameters
-batch_size = 128
+batch_size = 64
 hidden_size = 256
 embedding_size = 100
-epochs = 500
+epochs = 2
 optim_parameters = {'lr': 1e-4, 'weight_decay': 1e-3}
 
 # init dataloader
@@ -247,6 +275,7 @@ attention = Attention(hidden_size)
 decoder = LuongAttentionDecoder(embedding_size, hidden_size, vocabulary.__len__(), attention=attention)
 
 model = ChatbotModel(encoder, decoder, vocabulary.__len__(), attention=True).to(device)
+print(model.state_dict())
 #init the optimizer
 optim = optim.Adam(model.parameters(), **optim_parameters)
 # init loss function
@@ -257,28 +286,142 @@ epoch_history = []
 
 ### TRAIN LOOP ###
 
-for epoch in range(epochs):
-    # start counting epoch time
-    start_time = time.time()
-    # compute train loss
-    train_loss = train_loop()
-    # compute val loss
-    val_loss = val_loop()
-    # store train and val loss for later analysis
-    epoch_history.append((train_loss, val_loss))
-    torch.save({'epoch_history': epoch_history}, os.path.join())
-    # end of epoch
-    end_time = time.time()
-    # format elapsed time
-    elapsed_secs, elapsed_mins = format_time(start_time, end_time)
-    print("EPOCH [{}/{}] | Train Loss: {} | Val. Loss: {} | time: {}m {}s".format(epoch+1,
-                                                                                  epochs,
-                                                                                  train_loss,
-                                                                                  val_loss,
-                                                                                  elapsed_mins,
-                                                                                  elapsed_secs))
+checkpoint_path = os.path.join(os.curdir, 'saved_models/checkpoint.pth')
+path_saved_model = os.path.join(os.curdir, 'saved_models/trained_model.pth')
+# check if the model is already trained
+if os.path.exists(path_saved_model):
+    # load state_dict
+    model.load_state_dict(torch.load(path_saved_model))
+else:
+    # check if a training phase was already started
+    if os.path.exists(checkpoint_path):
+        # load trained values
+        loaded_checkpoint = torch.load(checkpoint_path)
+        # restore previous values
+        epoch = loaded_checkpoint['epoch']
+        model.load_state_dict(loaded_checkpoint['model_sd'])
+        optim.load_state_dict(loaded_checkpoint['optim_sd'])
+
+    print('Start training...')
+    for epoch in range(epochs):
+        # start counting epoch time
+        start_time = time.time()
+        # compute train loss
+        train_loss = train_loop()
+        # compute val loss
+        val_loss = val_loop()
+        # store train and val loss for later analysis
+        epoch_history.append((train_loss, val_loss))
+        # end of epoch
+        end_time = time.time()
+        # format elapsed time
+        elapsed_secs, elapsed_mins = format_time(start_time, end_time)
+        checkpoint = {'epoch': epoch,
+                      'optim_sd': optim.state_dict(),
+                      'model_sd':model.state_dict(),
+                      'train_loss': train_loss,
+                      'val_loss': val_loss
+                      }
+        torch.save(checkpoint, checkpoint_path)
+        print("EPOCH [{}/{}] | Train Loss: {} | Val. Loss: {} | time: {}m {}s".format(epoch+1,
+                                                                                           epochs,
+                                                                                           train_loss,
+                                                                                           val_loss,
+                                                                                           elapsed_mins,
+                                                                                           elapsed_secs))
 # save training model.
 print('Training completed.')
-save_models(model)
+torch.save(model.state_dict(), path_saved_model)
 
+def pad_sequence(sequence, max_length):
+    pad_token_idx = vocabulary.word_to_idx['<PAD>']
+    while len(sequence) != max_length:
+        sequence.append(pad_token_idx)
+    return sequence
+
+
+def format_user_input(sequence, max_length=10):
+    # convert each word into index from the vocabulary
+    regex = re.compile('[^a-zA-Z0-9.!?]')
+    sequence = regex.sub(' ', sequence)
+    # remove extra space
+    sequence = re.sub(r"([.!?])", r" \1", sequence)
+    # remove non-letter characters but keep regular punctuation
+    sentence = re.sub(r"[^a-zA-Z.!?]+", r" ", sequence)
+    sequence = sequence.lower()
+    sequence = sequence.strip().split()
+    user_seq_indices = []
+    for word in sequence:
+        if word in vocabulary.word_to_idx.keys():
+            user_seq_indices.append(vocabulary.word_to_idx[word])
+        else:
+            user_seq_indices.append(vocabulary.word_to_idx['<UNK>'])
+
+    # pad or trim the sentence
+    if len(user_seq_indices) > max_length:  # trim
+        user_seq_indices = user_seq_indices[:max_length]
+    elif len(user_seq_indices) < max_length:  # pad
+        user_seq_indices = pad_sequence(user_seq_indices, max_length)
+    user_seq_indices.insert(0, vocabulary.word_to_idx['<S>'])
+    user_seq_indices.append(vocabulary.word_to_idx['</S>'])
+    user_seq_indices = torch.tensor(user_seq_indices).unsqueeze(1)
+    return user_seq_indices
+
+
+def convert_to_string(reply):
+    parsed_reply = []
+    for word_idx in reply:
+        # if the word is PAD or END of Sentence token, ignore it.
+        word_idx = word_idx.cpu().numpy()[0][0]
+        reply = vocabulary.vocab[word_idx]
+        if word_idx == vocabulary.word_to_idx['<PAD>'] or word_idx == vocabulary.word_to_idx['</S>']:
+            break
+        else:
+            parsed_reply.append(reply)
+
+    return ' '.join(parsed_reply)
+
+
+def map_to_idx(sequence):
+    seq_idx = []
+    for word in sequence:
+        seq_idx.append(vocabulary.word_to_idx[word])
+    return seq_idx
+
+
+# evaluate the model to talk with it.
+def evaluate(seq, searcher):
+    # tensor should have shape [seq, 1]
+    seq = seq.to(device)
+    # feedforward to the searcher to get the list of most likely indices of words
+    bot_reply = searcher(seq)
+    # discard first element which is the start token
+    bot_reply = bot_reply[1:].to(device)
+    bot_reply = torch.topk(bot_reply, 1)
+    bot_reply = bot_reply.indices
+    # convert indices to words.
+    bot_reply = convert_to_string(bot_reply)
+    return bot_reply
+
+
+def run_bot(searcher, max_length=10):
+    user_input = ""
+    while(True):
+        try:
+            # ask the user for the input
+            user_input = input('> ')
+            # format the user input.
+            if user_input == 'quit':
+                break
+            user_input_idx = format_user_input(user_input, max_length)
+            # run the evaluate function to get bot's reply
+            reply = evaluate(user_input_idx, searcher)
+            print(reply)
+        except KeyError:
+            print('Error: While parsing the input sentence...')
+
+
+# run bot and begin dialog
+searcher = GreedySearch(encoder, decoder, vocabulary, attention=True)
+run_bot(searcher)
 
