@@ -171,6 +171,16 @@ class Vocabulary:
         return word_to_idx
 
 
+def select_n_pairs(data, limit):
+    """
+    This function limits the number of pairs to use in the dataset
+    :param data: the list of pairs, of shape [question, answer]
+    :param limit: the integer that represents the number of pairs to select from the data
+    :return data: the trimmed data with 'limit' number of pairs.
+    """
+    return data[:limit]
+
+
 def train_loop():
     batch_history = []
     model.train()
@@ -241,7 +251,7 @@ dialogs = extract_dialogs()
 # for each movie, create pairs dialogs (Q/A). This is the actual data used for training.
 pair_dialogs_idx = create_pair_dialogs(dialogs)
 # limit pairs for batch building
-pair_dialogs_idx = pair_dialogs_idx[:100]
+pair_dialogs_idx = select_n_pairs(pair_dialogs_idx, 50)
 # instantiate the vocabulary
 vocabulary = Vocabulary(idx_to_text, dialogs)
 print('Total words counted in the vocabulary: {}'.format(vocabulary.__len__()))
@@ -251,11 +261,11 @@ train_data = CornellCorpus(pair_dialogs_idx, vocabulary, train_data=True)
 val_data = CornellCorpus(pair_dialogs_idx, vocabulary, train_data=False)
 
 # hyperparameters
-batch_size = 64
-hidden_size = 256
-embedding_size = 100
+batch_size = 256
+hidden_size = 512
+embedding_size = 200
 epochs = 2
-optim_parameters = {'lr': 1e-4, 'weight_decay': 1e-3}
+optim_parameters = {'lr': 1e-5, 'weight_decay': 1e-3}
 
 # init dataloader
 load_args = {'batch_size': batch_size, 'shuffle': True}
