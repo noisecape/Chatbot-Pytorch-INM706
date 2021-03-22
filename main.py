@@ -278,6 +278,7 @@ epoch_history = []
 ### TRAIN LOOP ###
 
 checkpoint_path = os.path.join(os.curdir, 'saved_models/checkpoint.pth')
+
 path_saved_model = os.path.join(os.curdir, 'saved_models/trained_model.pth')
 # check if the model is already trained
 if os.path.exists(path_saved_model):

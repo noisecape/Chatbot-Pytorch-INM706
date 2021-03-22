@@ -101,12 +101,10 @@ class Attention(nn.Module):
         energy = self.attn(input_concat)
         # compute the so called 'attentional hidden state'
         energy = torch.tanh(energy)
-        # apply the score function (dot product) to compute the score
-        score = torch.sum(prev_hidden * energy, dim=2)
         # apply softmax layer to obtain the probability distribution.
-        attention = F.softmax(score, dim=0)
+        attention = F.softmax(energy, dim=0)
         # finally we'd like to append one dimension at the end for later operations.
-        return attention.unsqueeze(2)
+        return attention
 
 
 class LuongAttentionDecoder(nn.Module):
@@ -147,7 +145,7 @@ class LuongAttentionDecoder(nn.Module):
         attention = attention.permute(1, 2, 0)  # -> [batch, 1, seq_len]
         encoder_outputs = encoder_outputs.permute(1, 0, 2)  # -> [batch, seq_len, hidden*2]
         context_vector = torch.bmm(attention, encoder_outputs)  # -> [batch, 1, hidden*2]
-        context_vector = context_vector.permute(1, 0, 2) # -> [1, batch, hidden*2]
+        context_vector = context_vector.permute(1, 0, 2)  # -> [1, batch, hidden*2]
         # Finally, concatenate the context vector and the embedded word to build the
         # new input to feed forward pass to the lstm network.
         new_input = torch.cat((context_vector, embedded), dim=2)
@@ -211,6 +209,7 @@ class ChatbotModel(nn.Module):
                 word_t = y[t] if idx_choice == 0 else prediction
 
         return outputs
+
 
 class GreedySearch(nn.Module):
 
