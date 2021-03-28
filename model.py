@@ -81,7 +81,8 @@ class Attention(nn.Module):
         # hidden_size*3 is given by the fact that we concatenate the prev_hidden (of size hidden_size)
         # with the encoder states (of size hidden_size*2 because it's bidirectional)
         # the output is one because we want to output one value for each word in the batch (attention weight)
-        self.attn = nn.Linear(self.hidden_size*3, 1).to(device)
+        self.attn = nn.Sequential(nn.Linear(self.hidden_size*3, 1),
+                                  nn.ReLU()).to(device)
 
     def forward(self, prev_hidden, encoder_outputs):
         """
@@ -99,8 +100,6 @@ class Attention(nn.Module):
         input_concat = torch.cat((prev_hidden, encoder_outputs), dim=2)
         # compute the energy values through the 'small' neural network attention.
         energy = self.attn(input_concat)
-        # compute the so called 'attentional hidden state'
-        energy = torch.tanh(energy)
         # apply softmax layer to obtain the probability distribution.
         attention = F.softmax(energy, dim=0)
         # finally we'd like to append one dimension at the end for later operations.
@@ -116,7 +115,8 @@ class LuongAttentionDecoder(nn.Module):
         self.hidden_size = hidden_size
         self.attention = attention
         self.lstm = nn.LSTM((self.hidden_size*2) + embedding_size, hidden_size, num_layers=n_layers).to(device)
-        self.fc = nn.Linear(hidden_size, voc_len).to(device)
+        self.fc_model = nn.Sequential(nn.Linear(hidden_size, hidden_size),
+                                      nn.Linear(hidden_size, voc_len)).to(device)
 
     def forward(self, word, prev_hidden, prev_cell, encoder_outputs):
         """
@@ -129,7 +129,7 @@ class LuongAttentionDecoder(nn.Module):
         """
         # word -> [1, batch_size]
 
-        # remove the first dimension to perform the embedding
+        # add first dimension to perform the embedding
         word = word.unsqueeze(0)
         # embed each word of the batch
         embedded = self.embedding(word)
@@ -151,9 +151,10 @@ class LuongAttentionDecoder(nn.Module):
         new_input = torch.cat((context_vector, embedded), dim=2)
         outputs, (h, c) = self.lstm(new_input, (prev_hidden, prev_cell))
         # to get the predictions feed forward pass the outputs from the decoder to a final fully connected layer.
-        predictions = self.fc(outputs)
+        predictions = self.fc_model(outputs)
         predictions = predictions.squeeze(0)
         return predictions, h, c
+
 
 class ChatbotModel(nn.Module):
 
@@ -231,7 +232,7 @@ class GreedySearch(nn.Module):
         :param max_length: max length of the input sequence.
         :return predictions: the most likely sequence of words.
         """
-        seq_len = len(input_seq)
+        seq_len = input_seq.shape[0]
         outputs = torch.zeros(seq_len, 1, self.voc.__len__()).to(device)
         if self.attention:
             # forward pass the input through the encoder

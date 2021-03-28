@@ -77,16 +77,6 @@ def create_pair_dialogs(dialogs):
     return dialogs_pairs
 
 
-def save_models(model):
-    PATH = save_model_dir + '/chatbot_model'
-    torch.save(model.state_dict(), PATH)
-
-
-def load_model(model):
-    PATH = save_model_dir + '/chatbot_model'
-    model.load_state_dict(torch.load(PATH))
-
-
 def format_time(start, end):
     elapsed_time = end - start
     elapsed_mins = int(elapsed_time / 60)
@@ -181,7 +171,6 @@ def train_loop():
         optim.zero_grad()
         # compute loss to backpropagate
         loss = criterion(output, answer)
-        loss = loss / X[0].shape[1]
         # backpropagate to compute gradients
         loss.backward()
         # clip gradients to avoid exploding values
@@ -190,7 +179,6 @@ def train_loop():
         batch_history.append(loss.item())
         # print current loss every 500 processed batches
         if idx % 10 == 0:
-            path_checkpoint = os.path.join(os.curdir, 'saved_models/checkpoint.pth')
             print('BATCH [{}/{}], LOSS: {}'.format(idx, train_dataloader.__len__(), loss))
     avg_loss = np.sum(batch_history) / train_dataloader.__len__()
     return avg_loss
@@ -231,7 +219,7 @@ dialogs = extract_dialogs()
 # for each movie, create pairs dialogs (Q/A). This is the actual data used for training.
 pair_dialogs_idx = create_pair_dialogs(dialogs)
 # limit pairs for batch building
-pair_dialogs_idx = select_n_pairs(pair_dialogs_idx, 100000)
+pair_dialogs_idx = select_n_pairs(pair_dialogs_idx, 100000)  # 100000
 # instantiate the vocabulary
 vocabulary = Vocabulary(idx_to_text, dialogs)
 print('Total words counted in the vocabulary: {}'.format(vocabulary.__len__()))
@@ -243,16 +231,14 @@ val_data = CornellCorpus(pair_dialogs_idx, vocabulary, train_data=False)
 # hyperparameters
 batch_size = 512
 hidden_size = 128
-embedding_size = 128
-epochs = 25
+embedding_size = 300
+epochs = 10
 optim_parameters = {'lr': 1e-5, 'weight_decay': 1e-3}
 
 # init dataloader
 load_args = {'batch_size': batch_size, 'shuffle': True}
 train_dataloader = DataLoader(train_data, **load_args)
 val_dataloader = DataLoader(val_data, **load_args)
-print(train_dataloader.__len__())
-print(val_dataloader.__len__())
 # init seq2seq model, the parameters needed are
 # embedding_size -> the size of the embedding for each word
 # hidden_size -> the number of hidden neurons per unit
@@ -286,46 +272,46 @@ if os.path.exists(path_saved_model):
     model.load_state_dict(torch.load(path_saved_model, map_location=torch.device(device)))
 else:
     # check if a training phase was already started
-    if os.path.exists(checkpoint_path):
-        # load trained values
-        loaded_checkpoint = torch.load(checkpoint_path, map_location=torch.device(device))
-        # restore previous values
-        epoch = loaded_checkpoint['epoch']
-        model.load_state_dict(loaded_checkpoint['model_sd'])
-        optim.load_state_dict(loaded_checkpoint['optim_sd'])
+    # if os.path.exists(checkpoint_path):
+    #     # load trained values
+    #     loaded_checkpoint = torch.load(checkpoint_path, map_location=torch.device(device))
+    #     # restore previous values
+    #     epoch = loaded_checkpoint['epoch']
+    #     model.load_state_dict(loaded_checkpoint['model_sd'])
+    #     optim.load_state_dict(loaded_checkpoint['optim_sd'])
 
     # UNCOMMENT THE BELOW TO CONTINUE TRAINING
 
-    # print('Start training...')
-    # for epoch in range(epochs):
-    #     # start counting epoch time
-    #     start_time = time.time()
-    #     # compute train loss
-    #     train_loss = train_loop()
-    #     # compute val loss
-    #     val_loss = val_loop()
-    #     # store train and val loss for later analysis
-    #     epoch_history.append((train_loss, val_loss))
-    #     # end of epoch
-    #     end_time = time.time()
-    #     # format elapsed time
-    #     elapsed_secs, elapsed_mins = format_time(start_time, end_time)
-    #     checkpoint = {'epoch': epoch,
-    #                   'optim_sd': optim.state_dict(),
-    #                   'model_sd':model.state_dict(),
-    #                   'train_loss': train_loss,
-    #                   'val_loss': val_loss
-    #                   }
-    #     torch.save(checkpoint, checkpoint_path)
-    #     print("EPOCH [{}/{}] | Train Loss: {} | Val. Loss: {} | time: {}m {}s".format(epoch+1,
-    #                                                                                        epochs,
-    #                                                                                        train_loss,
-    #                                                                                        val_loss,
-    #                                                                                        elapsed_mins,
-    #                                                                                        elapsed_secs))
-    # # save training model.
-    # print('Training completed.')
-    # torch.save(model.state_dict(), path_saved_model)
+    print('Start training...')
+    for epoch in range(epochs):
+        # start counting epoch time
+        start_time = time.time()
+        # compute train loss
+        train_loss = train_loop()
+        # compute val loss
+        val_loss = val_loop()
+        # store train and val loss for later analysis
+        epoch_history.append((train_loss, val_loss))
+        # end of epoch
+        end_time = time.time()
+        # format elapsed time
+        elapsed_secs, elapsed_mins = format_time(start_time, end_time)
+        checkpoint = {'epoch': epoch,
+                      'optim_sd': optim.state_dict(),
+                      'model_sd':model.state_dict(),
+                      'train_loss': train_loss,
+                      'val_loss': val_loss
+                      }
+        # torch.save(checkpoint, checkpoint_path)
+        print("EPOCH [{}/{}] | Train Loss: {} | Val. Loss: {} | time: {}m {}s".format(epoch+1,
+                                                                                           epochs,
+                                                                                           train_loss,
+                                                                                           val_loss,
+                                                                                           elapsed_mins,
+                                                                                           elapsed_secs))
+    # save training model.
+    print('Training completed.')
+    torch.save(model.state_dict(), path_saved_model)
 
 def pad_sequence(sequence, max_length):
     pad_token_idx = vocabulary.word_to_idx['<PAD>']
