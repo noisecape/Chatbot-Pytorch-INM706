@@ -243,8 +243,6 @@ val_dataloader = DataLoader(val_data, **load_args)
 # embedding_size -> the size of the embedding for each word
 # hidden_size -> the number of hidden neurons per unit
 # voc_size -> the size of the vocabulary to embed each word
-# encoder = Encoder(embedding_size, hidden_size, vocabulary.__len__()).to(device)
-# decoder = Decoder(embedding_size, hidden_size, vocabulary.__len__()).to(device)
 
 encoder = EncoderAttention(embedding_size, hidden_size, vocabulary.__len__())
 attention = Attention(hidden_size)
@@ -272,13 +270,13 @@ if os.path.exists(path_saved_model):
     model.load_state_dict(torch.load(path_saved_model, map_location=torch.device(device)))
 else:
     # check if a training phase was already started
-    # if os.path.exists(checkpoint_path):
-    #     # load trained values
-    #     loaded_checkpoint = torch.load(checkpoint_path, map_location=torch.device(device))
-    #     # restore previous values
-    #     epoch = loaded_checkpoint['epoch']
-    #     model.load_state_dict(loaded_checkpoint['model_sd'])
-    #     optim.load_state_dict(loaded_checkpoint['optim_sd'])
+    if os.path.exists(checkpoint_path):
+        # load trained values
+        loaded_checkpoint = torch.load(checkpoint_path, map_location=torch.device(device))
+        # restore previous values
+        epoch = loaded_checkpoint['epoch']
+        model.load_state_dict(loaded_checkpoint['model_sd'])
+        optim.load_state_dict(loaded_checkpoint['optim_sd'])
 
     # UNCOMMENT THE BELOW TO CONTINUE TRAINING
 
@@ -311,7 +309,7 @@ else:
                                                                                            elapsed_secs))
     # save training model.
     print('Training completed.')
-    torch.save(model.state_dict(), path_saved_model)
+    # torch.save(model.state_dict(), path_saved_model)
 
 def pad_sequence(sequence, max_length):
     pad_token_idx = vocabulary.word_to_idx['<PAD>']

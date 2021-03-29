@@ -44,6 +44,7 @@ class EncoderAttention(nn.Module):
         # to solve the problem, add them together and obtain one unified tensor.
         h_n = h_n[0:1, :, :] + h_n[1:2, :, :]
         c_n = c_n[0:1, :, :] + c_n[1:2, :, :]
+        encoder_outputs = encoder_outputs[:, :, self.hidden_size:] + encoder_outputs[:, :, :self.hidden_size]
 
         return encoder_outputs, h_n, c_n
 
@@ -81,7 +82,7 @@ class Attention(nn.Module):
         # hidden_size*3 is given by the fact that we concatenate the prev_hidden (of size hidden_size)
         # with the encoder states (of size hidden_size*2 because it's bidirectional)
         # the output is one because we want to output one value for each word in the batch (attention weight)
-        self.attn = nn.Sequential(nn.Linear(self.hidden_size*3, 1),
+        self.attn = nn.Sequential(nn.Linear(self.hidden_size*2, 1),
                                   nn.ReLU()).to(device)
 
     def forward(self, prev_hidden, encoder_outputs):
@@ -114,7 +115,7 @@ class LuongAttentionDecoder(nn.Module):
         self.embedding = nn.Embedding(voc_len, embedding_size).to(device)
         self.hidden_size = hidden_size
         self.attention = attention
-        self.lstm = nn.LSTM((self.hidden_size*2) + embedding_size, hidden_size, num_layers=n_layers).to(device)
+        self.lstm = nn.LSTM(self.hidden_size + embedding_size, hidden_size, num_layers=n_layers).to(device)
         self.fc_model = nn.Sequential(nn.Linear(hidden_size, hidden_size),
                                       nn.Linear(hidden_size, voc_len)).to(device)
 
