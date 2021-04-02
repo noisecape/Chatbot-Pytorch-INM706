@@ -1,51 +1,51 @@
 import torch
-import torchvision
 from torch.utils.data import Dataset
-import re
+import numpy as np
 
 class CornellCorpus(Dataset):
 
-    def __init__(self, dialogs, vocabulary, train_data=True, split_ratio=0.9, max_length=10):
+    def __init__(self, dialogs, vocabulary, stage='train', split_ratio=[0.8, 0.1, 0.1], max_length=15):
         super(CornellCorpus, self).__init__()
-
-        self.dialogs_pair_idx = dialogs
         self.vocabulary = vocabulary
+        self.dialogs_pair_idx = dialogs
         self.max_length = max_length
-        self.train_data = train_data
+        self.split_ratio = split_ratio
+        self.stage = stage
+        self.data = self.build_data()
 
-        limit_index = int(len(self.dialogs_pair_idx)*split_ratio)
+    def build_data(self):
+        # define limit index for splitting
+        train_limit = int(len(self.dialogs_pair_idx)*self.split_ratio[0])
+        val_limit = train_limit + int(len(self.dialogs_pair_idx)*self.split_ratio[1])
+        test_limit = int(len(self.dialogs_pair_idx))
+        if self.stage == 'train':
+            return self.choose_pairs(0, train_limit)
+        elif self.stage == 'val':
+            return self.choose_pairs(train_limit, val_limit)
+        elif self.stage == 'test':
+            return self.choose_pairs(val_limit, test_limit)
 
-        self.data = self.build_data(limit_index)
-        print('Dataset built')
-        print('{} Dataset dimension: {}'.format('Train' if self.train_data else 'Validation', self.__len__()))
-
-    def build_data(self, limit_index):
+    def choose_pairs(self, start_limit, end_limit):
         dataset = []
-        if self.train_data:
-            for dialog in self.dialogs_pair_idx[:limit_index]:
-                for question, answer in zip(dialog.keys(), dialog.values()):
-                    q_a_pair = [self.vocabulary.idx_to_text[question], self.vocabulary.idx_to_text[answer]]
-                    if q_a_pair[0] == ' ' or q_a_pair[1] == ' ':
-                        print('Empty batch, discard')
-                    else:
-                        dataset.append(q_a_pair)
-        else:
-            for dialog in self.dialogs_pair_idx[limit_index:]:
-                for question, answer in zip(dialog.keys(), dialog.values()):
-                    q_a_pair = [self.vocabulary.idx_to_text[question], self.vocabulary.idx_to_text[answer]]
-                    if q_a_pair[0] == ' ' or q_a_pair[1] == ' ':
-                        print('Empty batch, discard')
-                    else:
-                        dataset.append(q_a_pair)
+        for dialog in self.dialogs_pair_idx[start_limit: end_limit]:
+            q_a_pair = [self.vocabulary.idx_to_text[dialog[0]], self.vocabulary.idx_to_text[dialog[1]]]
+            if q_a_pair[0] != ' ' and q_a_pair[1] != ' ':
+                dataset.append(q_a_pair)
+            else:
+                print('empty')
         return dataset
 
     def pad_sequence(self, sequence):
+        # useful tokens
         pad_token_idx = self.vocabulary.word_to_idx['<PAD>']
         end_token_idx = self.vocabulary.word_to_idx['</S>']
         start_token_idx = self.vocabulary.word_to_idx['<S>']
-        while len(sequence) != self.max_length:
-            sequence.append(pad_token_idx)
+        # append end token
         sequence.append(end_token_idx)
+        #pad the rest of the characters
+        while len(sequence) <= self.max_length:
+            sequence.append(pad_token_idx)
+        # insert start token
         sequence.insert(0, start_token_idx)
         return sequence
 

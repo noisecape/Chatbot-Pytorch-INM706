@@ -4,6 +4,7 @@ import torch.nn as nn
 import numpy as np
 import torch.nn.functional as F
 import numpy as np
+from torch.optim import Adam
 
 # check cuda availability
 device = torch.device('cpu')
@@ -29,22 +30,25 @@ class Encoder(nn.Module):
 
 class EncoderAttention(nn.Module):
 
-    def __init__(self, embedding_size, hidden_size, voc_len, num_layers=1):
+    def __init__(self, embedding_size, hidden_size, voc_len, num_layers=1, max_length=15):
         super(EncoderAttention, self).__init__()
         self.hidden_size = hidden_size
         self.embedding = nn.Embedding(voc_len, embedding_size).to(device)
         self.lstm = nn.LSTM(embedding_size, hidden_size, num_layers=num_layers, bidirectional=True).to(device)
+        self.max_length = max_length
 
     def forward(self, input_seq):
         seq_embedded = self.embedding(input_seq)
-        encoder_outputs, (h_n, c_n) = self.lstm(seq_embedded)
-
+        input_lentghs = torch.ones(input_seq.shape[1])* input_seq.shape[0]
+        packed = nn.utils.rnn.pack_padded_sequence(seq_embedded, input_lentghs)
+        encoder_outputs, (h_n, c_n) = self.lstm(packed)
+        encoder_outputs, _ = nn.utils.rnn.pad_packed_sequence(encoder_outputs)
         # because of the bidirection both h_n and c_n have 2 tensors (forward, backward), but
         # the decoder is not bidirection, thus only accepts one tensor.
         # to solve the problem, add them together and obtain one unified tensor.
         h_n = h_n[0:1, :, :] + h_n[1:2, :, :]
         c_n = c_n[0:1, :, :] + c_n[1:2, :, :]
-        encoder_outputs = encoder_outputs[:, :, self.hidden_size:] + encoder_outputs[:, :, :self.hidden_size]
+        encoder_outputs = encoder_outputs[:, :, :self.hidden_size] + encoder_outputs[:, :, self.hidden_size:]
 
         return encoder_outputs, h_n, c_n
 
@@ -69,9 +73,9 @@ class Decoder(nn.Module):
         x = x.unsqueeze(0)
         embedded_word = self.embedding(x)
         output, (h, c) = self.lstm(embedded_word, (h, c))
-        predictions = self.fc_1(output)
+        pred = self.fc_1(output).squeeze(0)
         # remove the 'extra' dimension
-        return predictions.squeeze(0), h
+        return pred, h, c
 
 
 class Attention(nn.Module):
@@ -83,7 +87,8 @@ class Attention(nn.Module):
         # with the encoder states (of size hidden_size*2 because it's bidirectional)
         # the output is one because we want to output one value for each word in the batch (attention weight)
         self.attn = nn.Sequential(nn.Linear(self.hidden_size*2, 1),
-                                  nn.ReLU()).to(device)
+                                  nn.ReLU(),
+                                  nn.Softmax(dim=0)).to(device)
 
     def forward(self, prev_hidden, encoder_outputs):
         """
@@ -100,9 +105,7 @@ class Attention(nn.Module):
         # concatenate the previous hidden state and the encoder's output
         input_concat = torch.cat((prev_hidden, encoder_outputs), dim=2)
         # compute the energy values through the 'small' neural network attention.
-        energy = self.attn(input_concat)
-        # apply softmax layer to obtain the probability distribution.
-        attention = F.softmax(energy, dim=0)
+        attention = self.attn(input_concat)
         # finally we'd like to append one dimension at the end for later operations.
         return attention
 
@@ -116,8 +119,7 @@ class LuongAttentionDecoder(nn.Module):
         self.hidden_size = hidden_size
         self.attention = attention
         self.lstm = nn.LSTM(self.hidden_size + embedding_size, hidden_size, num_layers=n_layers).to(device)
-        self.fc_model = nn.Sequential(nn.Linear(hidden_size, hidden_size),
-                                      nn.Linear(hidden_size, voc_len)).to(device)
+        self.fc_model = nn.Linear(hidden_size, voc_len).to(device)
 
     def forward(self, word, prev_hidden, prev_cell, encoder_outputs):
         """
@@ -150,11 +152,12 @@ class LuongAttentionDecoder(nn.Module):
         # Finally, concatenate the context vector and the embedded word to build the
         # new input to feed forward pass to the lstm network.
         new_input = torch.cat((context_vector, embedded), dim=2)
-        outputs, (h, c) = self.lstm(new_input, (prev_hidden, prev_cell))
+        outputs, (prev_hidden, prev_cell) = self.lstm(new_input, (prev_hidden, prev_cell))
         # to get the predictions feed forward pass the outputs from the decoder to a final fully connected layer.
         predictions = self.fc_model(outputs)
         predictions = predictions.squeeze(0)
-        return predictions, h, c
+
+        return predictions, prev_cell, prev_cell
 
 
 class ChatbotModel(nn.Module):
@@ -165,8 +168,11 @@ class ChatbotModel(nn.Module):
         self.decoder = decoder
         self.vocab_size = vocab_size
         self.attention = attention
+        self.tf_ratio = 0.5
+        optim_parameters = {'lr': 1e-4, 'weight_decay': 1e-3}
+        self.optim = Adam(list(encoder.parameters()) + list(decoder.parameters()), **optim_parameters)
 
-    def forward(self, X, y, tf_ratio=0.5):
+    def forward(self, X, y):
         """
         This function implement the forward method for both the regular Decoder and the
         one with the Attention mechanism implemented. This aspect is handled by a simple else-if control.
@@ -179,16 +185,16 @@ class ChatbotModel(nn.Module):
         seq_len = y.shape[0]
         batch_size = X.shape[1]
         # this will store all the outputs for the batches
-        outputs = torch.zeros(seq_len, batch_size, self.vocab_size)
+        outputs = torch.zeros(seq_len, batch_size, self.vocab_size).to(device)
         # compute the hidden and cell state from the encoder
         if self.attention:
-            encoder_outputs, h_n, c_n = self.encoder(X)
+            encoder_outputs, h_n, c_n = self.encoder(X[1:])
             word_t = y[0]
             for t in range(1, seq_len):
                 output, h_n, c_n = self.decoder(word_t, h_n, c_n, encoder_outputs)
                 outputs[t] = output
                 prediction = output.argmax(1)
-                probabilities = [tf_ratio, 1 - tf_ratio]
+                probabilities = [self.tf_ratio, 1 - self.tf_ratio]
                 idx_choice = np.argmax(np.random.multinomial(1, probabilities))
                 word_t = y[t] if idx_choice == 0 else prediction
         else:
@@ -198,7 +204,7 @@ class ChatbotModel(nn.Module):
             # compute the predictions through the decoder
             for t in range(1, seq_len):
                 # compute output, hidden state and cell state
-                output, h_n = self.decoder(word_t, h_n, c_n)
+                output, h_n, c_n = self.decoder(word_t, h_n, c_n)
                 # update the data structure to hold outputs
                 outputs[t] = output
                 # take the best prediction from the vocabulary.
@@ -206,10 +212,12 @@ class ChatbotModel(nn.Module):
                 # to get the best prediction for each sentence in the batch.
                 prediction = output.argmax(1)
                 # use teaching forcing to randomly chose the next input for the decoder
-                probabilities = [tf_ratio, 1-tf_ratio]
+                probabilities = [self.tf_ratio, 1-self.tf_ratio]
                 idx_choice = np.argmax(np.random.multinomial(1, probabilities))
-                word_t = y[t] if idx_choice == 0 else prediction
-
+                if idx_choice == 0:  # choose y[t] as the next word
+                    word_t = y[t]
+                else:
+                    word_t = prediction
         return outputs
 
 
@@ -220,6 +228,7 @@ class GreedySearch(nn.Module):
         self.encoder = encoder
         self.decoder = decoder
         self.attention = attention
+        self.tf_ratio = 0.5
         self.voc = voc
 
     def forward(self, input_seq, max_length=10):
@@ -237,7 +246,7 @@ class GreedySearch(nn.Module):
         outputs = torch.zeros(seq_len, 1, self.voc.__len__()).to(device)
         if self.attention:
             # forward pass the input through the encoder
-            encoder_outputs, h_n, c_n = self.encoder(input_seq)
+            encoder_outputs, h_n, c_n = self.encoder(input_seq[1:])
             # set the first input word of the decoder as the '<S>' token.
             word_t = self.voc.word_to_idx['<S>']
             word_t = torch.tensor([word_t]).to(device)
@@ -248,14 +257,14 @@ class GreedySearch(nn.Module):
                 word_t = prediction
                 word_t = word_t.to(device)
         else:
-            h_n, c_n = self.encoder(input_seq)
+            h_n, c_n = self.encoder(input_seq[1:])
             # set the first input word of the decoder as the '<S>' token.
             word_t = self.voc.word_to_idx['<S>']
             word_t = torch.tensor([word_t])
             # compute the predictions through the decoder
             for t in range(1, seq_len):
                 # compute output, hidden state and cell state
-                output, h_n = self.decoder(word_t, h_n, c_n)
+                output, h_n, c_n = self.decoder(word_t, h_n, c_n)
                 # update the data structure to hold outputs
                 outputs[t] = output
                 # take the best prediction from the vocabulary.
