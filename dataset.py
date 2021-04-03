@@ -4,7 +4,7 @@ import numpy as np
 
 class CornellCorpus(Dataset):
 
-    def __init__(self, dialogs, vocabulary, stage='train', split_ratio=[0.8, 0.1, 0.1], max_length=15):
+    def __init__(self, dialogs, vocabulary, stage='train', split_ratio=[0.8, 0.1, 0.1], max_length=10):
         super(CornellCorpus, self).__init__()
         self.vocabulary = vocabulary
         self.dialogs_pair_idx = dialogs

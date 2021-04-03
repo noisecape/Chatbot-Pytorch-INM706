@@ -39,10 +39,7 @@ class EncoderAttention(nn.Module):
 
     def forward(self, input_seq):
         seq_embedded = self.embedding(input_seq)
-        input_lentghs = torch.ones(input_seq.shape[1])* input_seq.shape[0]
-        packed = nn.utils.rnn.pack_padded_sequence(seq_embedded, input_lentghs)
-        encoder_outputs, (h_n, c_n) = self.lstm(packed)
-        encoder_outputs, _ = nn.utils.rnn.pad_packed_sequence(encoder_outputs)
+        encoder_outputs, (h_n, c_n) = self.lstm(seq_embedded)
         # because of the bidirection both h_n and c_n have 2 tensors (forward, backward), but
         # the decoder is not bidirection, thus only accepts one tensor.
         # to solve the problem, add them together and obtain one unified tensor.
@@ -87,7 +84,7 @@ class Attention(nn.Module):
         # with the encoder states (of size hidden_size*2 because it's bidirectional)
         # the output is one because we want to output one value for each word in the batch (attention weight)
         self.attn = nn.Sequential(nn.Linear(self.hidden_size*2, 1),
-                                  nn.ReLU(),
+                                  nn.Tanh(),
                                   nn.Softmax(dim=0)).to(device)
 
     def forward(self, prev_hidden, encoder_outputs):
@@ -119,7 +116,9 @@ class LuongAttentionDecoder(nn.Module):
         self.hidden_size = hidden_size
         self.attention = attention
         self.lstm = nn.LSTM(self.hidden_size + embedding_size, hidden_size, num_layers=n_layers).to(device)
-        self.fc_model = nn.Linear(hidden_size, voc_len).to(device)
+        self.fc_model = nn.Sequential(nn.Linear(hidden_size, hidden_size),
+                                      nn.ReLU(),
+                                      nn.Linear(hidden_size, voc_len)).to(device)
 
     def forward(self, word, prev_hidden, prev_cell, encoder_outputs):
         """
@@ -136,8 +135,7 @@ class LuongAttentionDecoder(nn.Module):
         word = word.unsqueeze(0)
         # embed each word of the batch
         embedded = self.embedding(word)
-        # repeat the prev_hidden because it contains one tensor but we want to concatenate it
-        # with encoder_outputs which has T tensors
+        # init decoder's hidden state as the last encoder hidden state.
         prev_hidden_repeated = prev_hidden.repeat(encoder_outputs.shape[0], 1, 1)
         # compute the attention values that will specify what part of the input sentence is more relevant
         attention = self.attention(prev_hidden_repeated, encoder_outputs)
@@ -162,12 +160,12 @@ class LuongAttentionDecoder(nn.Module):
 
 class ChatbotModel(nn.Module):
 
-    def __init__(self, encoder, decoder, vocab_size, attention):
+    def __init__(self, encoder, decoder, vocab_size, with_attention):
         super(ChatbotModel, self).__init__()
         self.encoder = encoder
         self.decoder = decoder
         self.vocab_size = vocab_size
-        self.attention = attention
+        self.attention = with_attention
         self.tf_ratio = 0.5
         optim_parameters = {'lr': 1e-4, 'weight_decay': 1e-3}
         self.optim = Adam(list(encoder.parameters()) + list(decoder.parameters()), **optim_parameters)
@@ -212,7 +210,7 @@ class ChatbotModel(nn.Module):
                 # to get the best prediction for each sentence in the batch.
                 prediction = output.argmax(1)
                 # use teaching forcing to randomly chose the next input for the decoder
-                probabilities = [self.tf_ratio, 1-self.tf_ratio]
+                probabilities = [self.tf_ratio, 1 - self.tf_ratio]
                 idx_choice = np.argmax(np.random.multinomial(1, probabilities))
                 if idx_choice == 0:  # choose y[t] as the next word
                     word_t = y[t]
@@ -228,7 +226,6 @@ class GreedySearch(nn.Module):
         self.encoder = encoder
         self.decoder = decoder
         self.attention = attention
-        self.tf_ratio = 0.5
         self.voc = voc
 
     def forward(self, input_seq, max_length=10):
@@ -238,7 +235,7 @@ class GreedySearch(nn.Module):
         most likely sequence of word of the chatbot. In this phase
         we don't use teaching forcing because we want
         to select only the words outputted by the decoder.
-        :param input: the input sequence typed by the user
+        :param input_seq: the input sequence typed by the user
         :param max_length: max length of the input sequence.
         :return predictions: the most likely sequence of words.
         """

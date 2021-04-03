@@ -151,22 +151,11 @@ class Vocabulary:
             word_to_idx[word] = idx
         return word_to_idx
 
-
 # USEFULL METHODS
-
-def select_n_pairs(data, limit):
-    """
-    This function limits the number of pairs to use in the dataset
-    :param data: the list of pairs, of shape [question, answer]
-    :param limit: the integer that represents the number of pairs to select from the data
-    :return data: the trimmed data with 'limit' number of pairs.
-    """
-    data = list(np.random.choice(data, limit))
-    return data
 
 def pad_sequence(sequence, max_length):
     pad_token_idx = vocabulary.word_to_idx['<PAD>']
-    while len(sequence) != max_length:
+    while len(sequence) <= max_length:
         sequence.append(pad_token_idx)
     return sequence
 
@@ -191,11 +180,12 @@ def format_user_input(sequence, max_length=10):
     # pad or trim the sentence
     if len(user_seq_indices) > max_length:  # trim
         user_seq_indices = user_seq_indices[:max_length]
-    elif len(user_seq_indices) < max_length:  # pad
+        user_seq_indices.append(vocabulary.word_to_idx['</S>'])
+    elif len(user_seq_indices) <= max_length:  # pad
+        user_seq_indices.append(vocabulary.word_to_idx['</S>'])
         user_seq_indices = pad_sequence(user_seq_indices, max_length)
-    user_seq_indices.insert(0, vocabulary.word_to_idx['<S>'])
-    user_seq_indices.append(vocabulary.word_to_idx['</S>'])
     user_seq_indices = torch.tensor(user_seq_indices).unsqueeze(1)
+    user_seq_indices = user_seq_indices.to(device)
     return user_seq_indices
 
 
@@ -256,10 +246,29 @@ def run_bot(searcher, testing=True, max_length=15):
             except KeyError:
                 print('Error: While parsing the input sentence...')
 
+
+def init_model(with_attention=False):
+    if with_attention:
+        # init with attention
+        encoder = EncoderAttention(embedding_size, hidden_size, vocabulary.__len__()).to(device)
+        attention = Attention(hidden_size).to(device)
+        decoder = LuongAttentionDecoder(embedding_size, hidden_size, vocabulary.__len__(), attention=attention).to(
+            device)
+        model = ChatbotModel(encoder, decoder, vocabulary.__len__(), with_attention=True).to(device)
+        return encoder, decoder, model
+    else:
+        # init with no attention
+        encoder = Encoder(embedding_size, hidden_size, vocabulary.__len__()).to(device)
+        decoder = Decoder(embedding_size, hidden_size, vocabulary.__len__()).to(device)
+        model = ChatbotModel(encoder, decoder, vocabulary.__len__(), with_attention=False).to(device)
+        return encoder, decoder, model
+
 def train_loop():
     batch_history = []
     model.train()
     avg_loss = 0
+    # start timer
+    start_time = time.time()
     for idx, X in enumerate(train_dataloader):
         # transpose both input sentence and target sentence to access using the first dimension
         # the the i-th word for each batch at each given time step t.
@@ -280,12 +289,22 @@ def train_loop():
         # backpropagate to compute gradients
         loss.backward()
         # clip gradients to avoid exploding values
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=50)
         model.optim.step()
         batch_history.append(loss.item())
         # print current loss every 500 processed batches
-        if idx % 10 == 0:
-            print('BATCH [{}/{}], LOSS TRAINING: {}'.format(idx, train_dataloader.__len__(), loss))
+        if idx % 500 == 0:
+            # end of epoch
+            end_time = time.time()
+            # format elapsed time
+            elapsed_secs, elapsed_mins = format_time(start_time, end_time)
+            print('BATCH [{}/{}], LOSS TRAINING: {}, eta: {}m {}s'.format(idx,
+                                                                          train_dataloader.__len__(),
+                                                                          loss,
+                                                                          elapsed_mins,
+                                                                          elapsed_secs))
+            # start timer
+            start_time = time.time()
     avg_loss = np.sum(batch_history) / train_dataloader.__len__()
     return avg_loss
 
@@ -311,90 +330,88 @@ def val_loop():
 
         # keep track of the loss
         batch_history.append(loss.item())
-        # print current loss every 500 processed batches
-        if idx % 2 == 0:
-            print('BATCH [{}/{}], LOSS VALIDATION: {}'.format(idx, val_dataloader.__len__(), loss))
     avg_loss = np.sum(batch_history) / val_dataloader.__len__()
     # test learning with dummy phrase
+    print("Test learning, input phrase: 'Hey what's your name?'")
     if model.attention:
-        searcher = GreedySearch(encoder, decoder, vocabulary, attention=True)
+        searcher = GreedySearch(encoder, decoder, vocabulary, attention=True).to(device)
     else:
-        searcher = GreedySearch(encoder, decoder, vocabulary, attention=False)
+        searcher = GreedySearch(encoder, decoder, vocabulary, attention=False).to(device)
     run_bot(searcher)
     return avg_loss
 
+# Define all the parameters for the model
 
-dir = os.path.join(os.curdir, 'cornell-movie-dialogs-corpus/movie_lines.txt')
-idx_to_text = get_movie_lines(dir)
+dirs = os.path.join(os.curdir, 'cornell-movie-dialogs-corpus/movie_lines.txt')
+idx_to_text = get_movie_lines(dirs)
 # create a list of dialogs for each movie.
 dialogs = extract_dialogs()
 # for each movie, create pairs dialogs (Q/A). This is the actual data used for training.
 pair_dialogs_idx = create_pair_dialogs(dialogs)
-# limit pairs for batch building
-# pair_dialogs_idx = select_n_pairs(pair_dialogs_idx, 100)  # 100000
 # instantiate the vocabulary
 vocabulary = Vocabulary(idx_to_text, dialogs)
 print('Total words counted in the vocabulary: {}'.format(vocabulary.__len__()))
 
 # shuffle data
 np.random.shuffle(pair_dialogs_idx)
-train_data = CornellCorpus(pair_dialogs_idx, vocabulary, max_length=15, stage='train')
-val_data = CornellCorpus(pair_dialogs_idx, vocabulary, max_length=15, stage='val')
-test_data = CornellCorpus(pair_dialogs_idx, vocabulary, max_length=15, stage='test')
+train_data = CornellCorpus(pair_dialogs_idx, vocabulary, max_length=10, stage='train')
+val_data = CornellCorpus(pair_dialogs_idx, vocabulary, max_length=10, stage='val')
+test_data = CornellCorpus(pair_dialogs_idx, vocabulary, max_length=10, stage='test')
+
+print('Total training batches: {}, Total val batches: {}, Total test batches: {}'.format(train_data.__len__(),
+                                                                                         val_data.__len__(),
+                                                                                         test_data.__len__()))
 
 # hyperparameters
 batch_size = 64
-hidden_size = 1024
+hidden_size = 256
 embedding_size = 300
-epochs = 50
+epochs = 10
 
 # init dataloader
 load_args = {'batch_size': batch_size, 'shuffle': True}
 train_dataloader = DataLoader(train_data, **load_args)
 val_dataloader = DataLoader(val_data, **load_args)
 test_dataloader = DataLoader(test_data, **load_args)
-# init seq2seq model, the parameters needed are
-# embedding_size -> the size of the embedding for each word
-# hidden_size -> the number of hidden neurons per unit
-# voc_size -> the size of the vocabulary to embed each word
 
-encoder = Encoder(embedding_size, hidden_size, vocabulary.__len__())
-decoder = Decoder(embedding_size, hidden_size, vocabulary.__len__())
-model = ChatbotModel(encoder, decoder, vocabulary.__len__(), attention=False).to(device)
-# encoder = EncoderAttention(embedding_size, hidden_size, vocabulary.__len__())
-# attention = Attention(hidden_size)
-# decoder = LuongAttentionDecoder(embedding_size, hidden_size, vocabulary.__len__(), attention=attention)
-# model = ChatbotModel(encoder, decoder, vocabulary.__len__(), attention=True).to(device)
+# init model
+encoder, decoder, model = init_model(with_attention=True)
 
 # init loss function
-# when computing the loss you want to ignore the '<PAD>' token.
-pad_index = vocabulary.word_to_idx['<PAD>']
-criterion = nn.CrossEntropyLoss(ignore_index=pad_index)
+criterion = nn.CrossEntropyLoss()
 epoch_history = []
 
 ### TRAIN LOOP ###
 
-checkpoint_path = os.path.join(os.curdir, 'saved_models/checkpoint.pth')
+epoch_idx = 0
 
-path_saved_model = os.path.join(os.curdir, 'saved_models/trained_model.pth')
-# check if the model is already trained
+if model.attention:
+    checkpoint_path = os.path.join(os.curdir, 'saved_models/checkpoint.pth')
+    path_saved_model = os.path.join(os.curdir, 'saved_models/trained_model.pth')
+else:
+    checkpoint_path = os.path.join(os.curdir, 'saved_models/checkpoint_no_att.pth')
+    path_saved_model = os.path.join(os.curdir, 'saved_models/trained_model_no_att.pth')
+    # check if the model is already trained
 if os.path.exists(path_saved_model):
     # load state_dict
+    print('Trained model found. Loading...')
     model.load_state_dict(torch.load(path_saved_model, map_location=torch.device(device)))
+    print('Model loaded.')
 else:
     # check if a training phase was already started
     if os.path.exists(checkpoint_path):
         # load trained values
         loaded_checkpoint = torch.load(checkpoint_path, map_location=torch.device(device))
+        print('Checkpoint found. Restore from [{}/{}] epoch.'.format(loaded_checkpoint['epoch'], epochs))
         # restore previous values
-        epoch = loaded_checkpoint['epoch']
+        epoch_idx = loaded_checkpoint['epoch']
         model.load_state_dict(loaded_checkpoint['model_sd'])
         model.optim.load_state_dict(loaded_checkpoint['optim_sd'])
 
     # UNCOMMENT THE BELOW TO CONTINUE TRAINING
 
     print('Start training...')
-    for epoch in range(epochs):
+    for epoch in range(epoch_idx, epochs):
         # start counting epoch time
         start_time = time.time()
         # compute train loss
@@ -413,7 +430,7 @@ else:
                       'train_loss': train_loss,
                       'val_loss': val_loss
                       }
-        # torch.save(checkpoint, checkpoint_path)
+        torch.save(checkpoint, checkpoint_path)
         print("EPOCH [{}/{}] | Train Loss: {} | Val. Loss: {} | time: {}m {}s".format(epoch+1,
                                                                                            epochs,
                                                                                            train_loss,
@@ -422,7 +439,9 @@ else:
                                                                                            elapsed_secs))
     # save training model.
     print('Training completed.')
-    # torch.save(model.state_dict(), path_saved_model)
+    torch.save(model.state_dict(), path_saved_model)
 
+searcher = GreedySearch(encoder, decoder, vocabulary, attention=True).to(device)
+run_bot(searcher, testing=False)
 
 
