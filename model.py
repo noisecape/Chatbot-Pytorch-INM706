@@ -83,9 +83,10 @@ class Attention(nn.Module):
         # hidden_size*3 is given by the fact that we concatenate the prev_hidden (of size hidden_size)
         # with the encoder states (of size hidden_size*2 because it's bidirectional)
         # the output is one because we want to output one value for each word in the batch (attention weight)
-        self.attn = nn.Sequential(nn.Linear(self.hidden_size*2, 1),
-                                  nn.Tanh(),
-                                  nn.Softmax(dim=0)).to(device)
+        self.attn = nn.Linear(self.hidden_size*2, 1).to(device)
+        self.tanh = nn.Tanh().to(device)
+        self.v = nn.Parameter(torch.FloatTensor(hidden_size))
+        self.softmax = nn.Softmax(dim=0).to(device)
 
     def forward(self, prev_hidden, encoder_outputs):
         """
@@ -102,7 +103,9 @@ class Attention(nn.Module):
         # concatenate the previous hidden state and the encoder's output
         input_concat = torch.cat((prev_hidden, encoder_outputs), dim=2)
         # compute the energy values through the 'small' neural network attention.
-        attention = self.attn(input_concat)
+        energy = self.tanh(self.attn(input_concat))
+        energy = torch.sum(self.v * energy, dim=2)
+        attention = self.softmax(energy)
         # finally we'd like to append one dimension at the end for later operations.
         return attention
 
@@ -138,12 +141,13 @@ class LuongAttentionDecoder(nn.Module):
         # init decoder's hidden state as the last encoder hidden state.
         prev_hidden_repeated = prev_hidden.repeat(encoder_outputs.shape[0], 1, 1)
         # compute the attention values that will specify what part of the input sentence is more relevant
-        attention = self.attention(prev_hidden_repeated, encoder_outputs)
+        attention = self.attention(prev_hidden_repeated, encoder_outputs).unsqueeze(1)
 
         # in order to combine the attention weights with the encoder outputs we want to multiply
         # them element wise. To do that we have to adjust the dimensions of those data structures.
         # the multiplication is achieved by the 'torch.bmm' operator. This will output the new context vector.
-        attention = attention.permute(1, 2, 0)  # -> [batch, 1, seq_len]
+        # attention = attention.permute(1, 2, 0)  # -> [batch, 1, seq_len]
+        attention = attention.permute(2, 1, 0)
         encoder_outputs = encoder_outputs.permute(1, 0, 2)  # -> [batch, seq_len, hidden*2]
         context_vector = torch.bmm(attention, encoder_outputs)  # -> [batch, 1, hidden*2]
         context_vector = context_vector.permute(1, 0, 2)  # -> [1, batch, hidden*2]
@@ -168,7 +172,7 @@ class ChatbotModel(nn.Module):
         self.attention = with_attention
         self.tf_ratio = 0.5
         optim_parameters = {'lr': 1e-4, 'weight_decay': 1e-3}
-        self.optim = Adam(list(encoder.parameters()) + list(decoder.parameters()), **optim_parameters)
+        self.optim = Adam(self.parameters(), **optim_parameters)
 
     def forward(self, X, y):
         """
@@ -186,7 +190,7 @@ class ChatbotModel(nn.Module):
         outputs = torch.zeros(seq_len, batch_size, self.vocab_size, dtype=torch.float).to(device)
         # compute the hidden and cell state from the encoder
         if self.attention:
-            encoder_outputs, h_n, c_n = self.encoder(X[1:])
+            encoder_outputs, h_n, c_n = self.encoder(X)
             word_t = y[0]
             loss = 0
             for t in range(1, seq_len):
@@ -248,7 +252,7 @@ class GreedySearch(nn.Module):
         outputs = torch.zeros(seq_len, 1, self.voc.__len__()).to(device)
         if self.attention:
             # forward pass the input through the encoder
-            encoder_outputs, h_n, c_n = self.encoder(input_seq[1:])
+            encoder_outputs, h_n, c_n = self.encoder(input_seq)
             # set the first input word of the decoder as the '<S>' token.
             word_t = self.voc.word_to_idx['<S>']
             word_t = torch.tensor([word_t]).to(device)

@@ -225,7 +225,7 @@ def evaluate(seq, searcher):
     return bot_reply
 
 
-def run_bot(searcher, testing=True, max_length=15):
+def run_bot(searcher, testing=True, max_length=10):
     if testing:
         user_input = 'Hey'
         user_input_idx = format_user_input(user_input, max_length)
@@ -408,6 +408,9 @@ else:
         epoch_idx = loaded_checkpoint['epoch']
         model.load_state_dict(loaded_checkpoint['model_sd'])
         model.optim.load_state_dict(loaded_checkpoint['optim_sd'])
+        ## testing
+        searcher = GreedySearch(encoder, decoder, vocabulary, attention=True).to(device)
+        run_bot(searcher, testing=False)
 
     # UNCOMMENT THE BELOW TO CONTINUE TRAINING
 
