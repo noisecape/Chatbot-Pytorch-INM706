@@ -104,7 +104,7 @@ class Attention(nn.Module):
         input_concat = torch.cat((prev_hidden, encoder_outputs), dim=2)
         # compute the energy values through the 'small' neural network attention.
         energy = self.tanh(self.attn(input_concat))
-        energy = torch.sum(self.v * energy, dim=2)
+        energy = torch.sum(self.v * energy, dim=2).t()
         attention = self.softmax(energy)
         # finally we'd like to append one dimension at the end for later operations.
         return attention
@@ -147,7 +147,6 @@ class LuongAttentionDecoder(nn.Module):
         # them element wise. To do that we have to adjust the dimensions of those data structures.
         # the multiplication is achieved by the 'torch.bmm' operator. This will output the new context vector.
         # attention = attention.permute(1, 2, 0)  # -> [batch, 1, seq_len]
-        attention = attention.permute(2, 1, 0)
         encoder_outputs = encoder_outputs.permute(1, 0, 2)  # -> [batch, seq_len, hidden*2]
         context_vector = torch.bmm(attention, encoder_outputs)  # -> [batch, 1, hidden*2]
         context_vector = context_vector.permute(1, 0, 2)  # -> [1, batch, hidden*2]
