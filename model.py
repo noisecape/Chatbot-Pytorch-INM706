@@ -177,24 +177,28 @@ class ChatbotModel(nn.Module):
         In order to achieve a better convergence, the teaching force technique is used with probability of 0.5
         :param X: the batch of input sentences.
         :param y: the batch of target senteces.
-        :param tf_ratio: teaching force ratio used to choose the next word to pass to the decoder.
         :return outputs: the outputs of the Decoder for each batch.
         """
         seq_len = y.shape[0]
         batch_size = X.shape[1]
+        batch_history = []
         # this will store all the outputs for the batches
-        outputs = torch.zeros(seq_len, batch_size, self.vocab_size).to(device)
+        outputs = torch.zeros(seq_len, batch_size, self.vocab_size, dtype=torch.float).to(device)
         # compute the hidden and cell state from the encoder
         if self.attention:
             encoder_outputs, h_n, c_n = self.encoder(X[1:])
             word_t = y[0]
+            loss = 0
             for t in range(1, seq_len):
                 output, h_n, c_n = self.decoder(word_t, h_n, c_n, encoder_outputs)
                 outputs[t] = output
                 prediction = output.argmax(1)
                 probabilities = [self.tf_ratio, 1 - self.tf_ratio]
                 idx_choice = np.argmax(np.random.multinomial(1, probabilities))
-                word_t = y[t] if idx_choice == 0 else prediction
+                if idx_choice == 0:  # choose y[t] as the next word
+                    word_t = y[t]
+                else:
+                    word_t = prediction
         else:
             h_n, c_n = self.encoder(X)
             # initially consider the <S> token for all the batches
@@ -216,6 +220,7 @@ class ChatbotModel(nn.Module):
                     word_t = y[t]
                 else:
                     word_t = prediction
+
         return outputs
 
 

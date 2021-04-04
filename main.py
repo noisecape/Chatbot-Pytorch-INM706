@@ -276,16 +276,17 @@ def train_loop():
         answer = torch.transpose(X[1].to(device), 0, 1)
         # compute the output. Recall the output size should be (seq_len, batch_size, voc_size)
         output = model(question, answer)
+
         # don't consider the first element in all batches because it's the '<S>' token
         output = output[1:].to(device)
         answer = answer[1:].to(device)
-        # reshape both question and answer to the correct size for the loss function
-        output = output.reshape(-1, output.shape[2])
-        answer = answer.reshape(-1)
+        loss = 0
+        for t, batch_out in enumerate(output):
+            loss += criterion(batch_out, answer[t])
+
+        loss /= output.shape[0]
         # default previous weights values
         model.optim.zero_grad()
-        # compute loss to backpropagate
-        loss = criterion(output, answer)
         # backpropagate to compute gradients
         loss.backward()
         # clip gradients to avoid exploding values
@@ -378,7 +379,7 @@ test_dataloader = DataLoader(test_data, **load_args)
 encoder, decoder, model = init_model(with_attention=True)
 
 # init loss function
-criterion = nn.CrossEntropyLoss()
+criterion = nn.CrossEntropyLoss(ignore_index=vocabulary.word_to_idx['<PAD>'])
 epoch_history = []
 
 ### TRAIN LOOP ###
