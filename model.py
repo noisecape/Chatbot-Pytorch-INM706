@@ -1,8 +1,5 @@
 import torch
-import torchvision
 import torch.nn as nn
-import numpy as np
-import torch.nn.functional as F
 import numpy as np
 from torch.optim import Adam
 
@@ -18,6 +15,8 @@ class Encoder(nn.Module):
         self.hidden_size = hidden_size
         self.embedding = nn.Embedding(voc_len, embedding_size).to(device)
         self.lstm = nn.LSTM(embedding_size, hidden_size, num_layers=num_layers).to(device)
+        optim_parameters = {'lr': 1e-3, 'weight_decay': 1e-3}
+        self.optim = Adam(self.parameters(), **optim_parameters)
 
     def forward(self, input_seq):
         # convert words of the sequence to embeddings
@@ -30,15 +29,23 @@ class Encoder(nn.Module):
 
 class EncoderAttention(nn.Module):
 
-    def __init__(self, embedding_size, hidden_size, voc_len, num_layers=1, max_length=15):
+    def __init__(self, embedding_size, hidden_size, voc_len, num_layers=1, max_length=10):
         super(EncoderAttention, self).__init__()
         self.hidden_size = hidden_size
         self.embedding = nn.Embedding(voc_len, embedding_size).to(device)
+        self.dropout = nn.Dropout()
         self.lstm = nn.LSTM(embedding_size, hidden_size, num_layers=num_layers, bidirectional=True).to(device)
         self.max_length = max_length
+        optim_parameters = {'lr': 1e-3, 'weight_decay': 1e-3}
+        self.optim = Adam(self.parameters(), **optim_parameters)
+
+        # init weights
+        for _, p in self.state_dict().items():
+            nn.init.normal_(p)
 
     def forward(self, input_seq):
-        seq_embedded = self.embedding(input_seq)
+        seq_embedded = self.dropout(self.embedding(input_seq))
+
         encoder_outputs, (h_n, c_n) = self.lstm(seq_embedded)
         # because of the bidirection both h_n and c_n have 2 tensors (forward, backward), but
         # the decoder is not bidirection, thus only accepts one tensor.
@@ -56,7 +63,10 @@ class Decoder(nn.Module):
         super(Decoder, self).__init__()
         self.embedding = nn.Embedding(voc_len, embedding_size).to(device)
         self.lstm = nn.LSTM(embedding_size, hidden_size, num_layers=num_layers, bidirectional=False).to(device)
+        self.relu = nn.ReLU()
         self.fc_1 = nn.Linear(hidden_size, voc_len).to(device)
+        optim_parameters = {'lr': 5e-3, 'weight_decay': 1e-3}
+        self.optim = Adam(self.parameters(), **optim_parameters)
 
     def forward(self, x, h, c):
         """
@@ -70,6 +80,7 @@ class Decoder(nn.Module):
         x = x.unsqueeze(0)
         embedded_word = self.embedding(x)
         output, (h, c) = self.lstm(embedded_word, (h, c))
+        output = self.relu(output)
         pred = self.fc_1(output).squeeze(0)
         # remove the 'extra' dimension
         return pred, h, c
@@ -85,8 +96,10 @@ class Attention(nn.Module):
         # the output is one because we want to output one value for each word in the batch (attention weight)
         self.attn = nn.Linear(self.hidden_size*2, 1).to(device)
         self.tanh = nn.Tanh().to(device)
-        self.v = nn.Parameter(torch.FloatTensor(hidden_size))
         self.softmax = nn.Softmax(dim=0).to(device)
+        # init weights
+        for _, p in self.state_dict().items():
+            nn.init.normal_(p)
 
     def forward(self, prev_hidden, encoder_outputs):
         """
@@ -104,7 +117,6 @@ class Attention(nn.Module):
         input_concat = torch.cat((prev_hidden, encoder_outputs), dim=2)
         # compute the energy values through the 'small' neural network attention.
         energy = self.tanh(self.attn(input_concat))
-        energy = torch.sum(self.v * energy, dim=2).t()
         attention = self.softmax(energy)
         # finally we'd like to append one dimension at the end for later operations.
         return attention
@@ -122,6 +134,13 @@ class LuongAttentionDecoder(nn.Module):
         self.fc_model = nn.Sequential(nn.Linear(hidden_size, hidden_size),
                                       nn.ReLU(),
                                       nn.Linear(hidden_size, voc_len)).to(device)
+        optim_parameters = {'lr': 5e-3, 'weight_decay': 1e-3}
+        self.optim = Adam(self.parameters(), **optim_parameters)
+
+        # init weights
+        for _, p in self.state_dict().items():
+            nn.init.normal_(p)
+
 
     def forward(self, word, prev_hidden, prev_cell, encoder_outputs):
         """
@@ -141,12 +160,12 @@ class LuongAttentionDecoder(nn.Module):
         # init decoder's hidden state as the last encoder hidden state.
         prev_hidden_repeated = prev_hidden.repeat(encoder_outputs.shape[0], 1, 1)
         # compute the attention values that will specify what part of the input sentence is more relevant
-        attention = self.attention(prev_hidden_repeated, encoder_outputs).unsqueeze(1)
+        attention = self.attention(prev_hidden_repeated, encoder_outputs)
 
         # in order to combine the attention weights with the encoder outputs we want to multiply
         # them element wise. To do that we have to adjust the dimensions of those data structures.
         # the multiplication is achieved by the 'torch.bmm' operator. This will output the new context vector.
-        # attention = attention.permute(1, 2, 0)  # -> [batch, 1, seq_len]
+        attention = attention.permute(1, 2, 0)  # -> [batch, 1, seq_len]
         encoder_outputs = encoder_outputs.permute(1, 0, 2)  # -> [batch, seq_len, hidden*2]
         context_vector = torch.bmm(attention, encoder_outputs)  # -> [batch, 1, hidden*2]
         context_vector = context_vector.permute(1, 0, 2)  # -> [1, batch, hidden*2]
@@ -163,15 +182,17 @@ class LuongAttentionDecoder(nn.Module):
 
 class ChatbotModel(nn.Module):
 
-    def __init__(self, encoder, decoder, vocab_size, with_attention):
+    def __init__(self, encoder, decoder, vocab_size, with_attention, tf_ratio):
         super(ChatbotModel, self).__init__()
         self.encoder = encoder
         self.decoder = decoder
         self.vocab_size = vocab_size
         self.attention = with_attention
-        self.tf_ratio = 0.5
-        optim_parameters = {'lr': 1e-4, 'weight_decay': 1e-3}
-        self.optim = Adam(self.parameters(), **optim_parameters)
+        self.tf_ratio = tf_ratio
+
+        # init weights
+        for _, p in self.state_dict().items():
+            nn.init.normal_(p)
 
     def forward(self, X, y):
         """
@@ -188,10 +209,10 @@ class ChatbotModel(nn.Module):
         # this will store all the outputs for the batches
         outputs = torch.zeros(seq_len, batch_size, self.vocab_size, dtype=torch.float).to(device)
         # compute the hidden and cell state from the encoder
+
         if self.attention:
             encoder_outputs, h_n, c_n = self.encoder(X)
             word_t = y[0]
-            loss = 0
             for t in range(1, seq_len):
                 output, h_n, c_n = self.decoder(word_t, h_n, c_n, encoder_outputs)
                 outputs[t] = output
@@ -216,9 +237,9 @@ class ChatbotModel(nn.Module):
                 # Since the dimension in (batch_size, len_voc), take the argmax of the second dimension
                 # to get the best prediction for each sentence in the batch.
                 prediction = output.argmax(1)
-                # use teaching forcing to randomly chose the next input for the decoder
                 probabilities = [self.tf_ratio, 1 - self.tf_ratio]
                 idx_choice = np.argmax(np.random.multinomial(1, probabilities))
+                # use teaching forcing to randomly chose the next input for the decoder
                 if idx_choice == 0:  # choose y[t] as the next word
                     word_t = y[t]
                 else:

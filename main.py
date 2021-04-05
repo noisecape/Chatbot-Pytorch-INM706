@@ -102,7 +102,7 @@ class Vocabulary:
             # eliminate extra spaces for punctuation
             sentence = re.sub(r"([.,!?'])", r" \1", sentence)
             # remove non-letter characters but keep regular punctuation
-            sentence = re.sub(r"[^a-zA-Z.,!?]+", r" ", sentence)
+            sentence = re.sub(r"[^a-zA-Z,.?!]+", r" ", sentence)
             normalized_idx_to_sentence[line_id] = sentence
 
         # filters empty q-a pairs
@@ -138,10 +138,10 @@ class Vocabulary:
         unknown_token = '<UNK>'
         pad_token = '<PAD>'
         word_to_idx = sorted(word_to_idx)
-        word_to_idx.append(start_token)
-        word_to_idx.append(end_token)
-        word_to_idx.append(unknown_token)
-        word_to_idx.append(pad_token)
+        word_to_idx.insert(0, unknown_token)
+        word_to_idx.insert(0, end_token)
+        word_to_idx.insert(0, start_token)
+        word_to_idx.insert(0, pad_token)
         word_to_idx = self.build_dictionary(word_to_idx)
         return word_to_idx
 
@@ -226,8 +226,10 @@ def evaluate(seq, searcher):
 
 
 def run_bot(searcher, testing=True, max_length=10):
+    model.encoder.eval()
+    model.decoder.eval()
     if testing:
-        user_input = 'Hey'
+        user_input = 'Hey how are you?'
         user_input_idx = format_user_input(user_input, max_length)
         reply = evaluate(user_input_idx, searcher)
         print(reply)
@@ -247,29 +249,34 @@ def run_bot(searcher, testing=True, max_length=10):
                 print('Error: While parsing the input sentence...')
 
 
-def init_model(with_attention=False):
+def init_model(with_attention=False, teaching_force_ratio=0.5):
     if with_attention:
         # init with attention
         encoder = EncoderAttention(embedding_size, hidden_size, vocabulary.__len__()).to(device)
         attention = Attention(hidden_size).to(device)
         decoder = LuongAttentionDecoder(embedding_size, hidden_size, vocabulary.__len__(), attention=attention).to(
             device)
-        model = ChatbotModel(encoder, decoder, vocabulary.__len__(), with_attention=True).to(device)
+        model = ChatbotModel(encoder, decoder, vocabulary.__len__(), with_attention=True, tf_ratio=teaching_force_ratio).to(device)
         return encoder, decoder, model
     else:
         # init with no attention
         encoder = Encoder(embedding_size, hidden_size, vocabulary.__len__()).to(device)
         decoder = Decoder(embedding_size, hidden_size, vocabulary.__len__()).to(device)
-        model = ChatbotModel(encoder, decoder, vocabulary.__len__(), with_attention=False).to(device)
+        model = ChatbotModel(encoder, decoder, vocabulary.__len__(), with_attention=False, tf_ratio=teaching_force_ratio).to(device)
         return encoder, decoder, model
+
 
 def train_loop():
     batch_history = []
-    model.train()
+    model.encoder.train()
+    model.decoder.train()
     avg_loss = 0
     # start timer
     start_time = time.time()
     for idx, X in enumerate(train_dataloader):
+        # default previous weights values
+        model.encoder.optim.zero_grad()
+        model.decoder.optim.zero_grad()
         # transpose both input sentence and target sentence to access using the first dimension
         # the the i-th word for each batch at each given time step t.
         question = torch.transpose(X[0].to(device), 0, 1)
@@ -280,18 +287,18 @@ def train_loop():
         # don't consider the first element in all batches because it's the '<S>' token
         output = output[1:].to(device)
         answer = answer[1:].to(device)
-        loss = 0
-        for t, batch_out in enumerate(output):
-            loss += criterion(batch_out, answer[t])
 
-        loss /= output.shape[0]
-        # default previous weights values
-        model.optim.zero_grad()
+        output = output.reshape(-1, output.shape[2])
+        answer = answer.reshape(-1)
+
+        # compute loss
+        loss = criterion(output, answer)
         # backpropagate to compute gradients
         loss.backward()
         # clip gradients to avoid exploding values
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=50)
-        model.optim.step()
+        model.encoder.optim.step()
+        model.decoder.optim.step()
         batch_history.append(loss.item())
         # print current loss every 500 processed batches
         if idx % 500 == 0:
@@ -309,8 +316,10 @@ def train_loop():
     avg_loss = np.sum(batch_history) / train_dataloader.__len__()
     return avg_loss
 
+
 def val_loop():
-    model.eval()
+    model.encoder.eval()
+    model.decoder.eval()
     batch_history = []
     avg_loss = 0
     for idx, X in enumerate(val_dataloader):
@@ -365,9 +374,9 @@ print('Total training batches: {}, Total val batches: {}, Total test batches: {}
 
 # hyperparameters
 batch_size = 64
-hidden_size = 256
-embedding_size = 300
-epochs = 10
+hidden_size = 512
+embedding_size = 1000
+epochs = 50
 
 # init dataloader
 load_args = {'batch_size': batch_size, 'shuffle': True}
@@ -379,7 +388,7 @@ test_dataloader = DataLoader(test_data, **load_args)
 encoder, decoder, model = init_model(with_attention=True)
 
 # init loss function
-criterion = nn.CrossEntropyLoss(ignore_index=vocabulary.word_to_idx['<PAD>'])
+criterion = nn.CrossEntropyLoss()
 epoch_history = []
 
 ### TRAIN LOOP ###
