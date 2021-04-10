@@ -8,27 +8,38 @@ device = torch.device('cpu')
 if torch.cuda.is_available():
     device = torch.device('cuda')
 
+
 class Encoder(nn.Module):
+    """
+    The class that implements the Encoder.
+    """
 
     def __init__(self, embedding_size, hidden_size, voc_len, num_layers=1):
         super(Encoder, self).__init__()
         self.hidden_size = hidden_size
         self.embedding = nn.Embedding(voc_len, embedding_size).to(device)
         self.lstm = nn.LSTM(embedding_size, hidden_size, num_layers=num_layers).to(device)
-        optim_parameters = {'lr': 1e-3, 'weight_decay': 1e-3}
+        optim_parameters = {'lr': 1e-5, 'weight_decay': 1e-5}
         self.optim = Adam(self.parameters(), **optim_parameters)
+        # init weights
+        for _, p in self.state_dict().items():
+            nn.init.normal_(p)
 
     def forward(self, input_seq):
-        # convert words of the sequence to embeddings
-        # seq_embedded should have dimension (input_seq, embedding_size) when given in input.
-        # the shape of seq_embedded when embedded is (*, H) where H is the embedding_size.
+        """
+        Encodes the input sequence and outputs the hidden state and the cell state.
+        :param input_seq: the sequence of words indices to be encoded
+        :return: hidden state and cell state
+        """
         seq_embedded = self.embedding(input_seq)  # of shape (seq_len, batch_size, embedding_size)
         output, (h_n, c_n) = self.lstm(seq_embedded)
         return h_n, c_n
 
 
 class EncoderAttention(nn.Module):
-
+    """
+    The class that implements the Encoder which uses the attention mechanism
+    """
     def __init__(self, embedding_size, hidden_size, voc_len, num_layers=1, max_length=10):
         super(EncoderAttention, self).__init__()
         self.hidden_size = hidden_size
@@ -36,7 +47,7 @@ class EncoderAttention(nn.Module):
         self.dropout = nn.Dropout()
         self.lstm = nn.LSTM(embedding_size, hidden_size, num_layers=num_layers, bidirectional=True).to(device)
         self.max_length = max_length
-        optim_parameters = {'lr': 1e-3, 'weight_decay': 1e-3}
+        optim_parameters = {'lr': 1e-5, 'weight_decay': 1e-5}
         self.optim = Adam(self.parameters(), **optim_parameters)
 
         # init weights
@@ -44,29 +55,38 @@ class EncoderAttention(nn.Module):
             nn.init.normal_(p)
 
     def forward(self, input_seq):
+        """
+        Encodes the input sequence and outputs the hidden state and the cell state.
+        :param input_seq: the sequence of words indices to be encoded
+        :return: the output features from the last layer, hidden state and cell state
+        """
         seq_embedded = self.dropout(self.embedding(input_seq))
-
+        # forward pass through the encoder the sentence
         encoder_outputs, (h_n, c_n) = self.lstm(seq_embedded)
         # because of the bidirection both h_n and c_n have 2 tensors (forward, backward), but
-        # the decoder is not bidirection, thus only accepts one tensor.
-        # to solve the problem, add them together and obtain one unified tensor.
+        # the decoder is not bidirection, thus we merge the values from forward and backward direction.
         h_n = h_n[0:1, :, :] + h_n[1:2, :, :]
         c_n = c_n[0:1, :, :] + c_n[1:2, :, :]
+        # similarly, we sum bidirectional values for the outputs
         encoder_outputs = encoder_outputs[:, :, :self.hidden_size] + encoder_outputs[:, :, self.hidden_size:]
-
         return encoder_outputs, h_n, c_n
 
 
 class Decoder(nn.Module):
-
+    """
+    Implements the Decoder of the Seq2Seq model
+    """
     def __init__(self, embedding_size, hidden_size, voc_len, num_layers=1):
         super(Decoder, self).__init__()
         self.embedding = nn.Embedding(voc_len, embedding_size).to(device)
         self.lstm = nn.LSTM(embedding_size, hidden_size, num_layers=num_layers, bidirectional=False).to(device)
-        self.relu = nn.ReLU()
+        self.relu = nn.ReLU().to(device)
         self.fc_1 = nn.Linear(hidden_size, voc_len).to(device)
-        optim_parameters = {'lr': 5e-3, 'weight_decay': 1e-3}
+        optim_parameters = {'lr': 1e-5, 'weight_decay': 1e-5}
         self.optim = Adam(self.parameters(), **optim_parameters)
+        # init weights
+        for _, p in self.state_dict().items():
+            nn.init.normal_(p)
 
     def forward(self, x, h, c):
         """
@@ -82,29 +102,29 @@ class Decoder(nn.Module):
         output, (h, c) = self.lstm(embedded_word, (h, c))
         output = self.relu(output)
         pred = self.fc_1(output).squeeze(0)
-        # remove the 'extra' dimension
         return pred, h, c
 
 
 class Attention(nn.Module):
-
+    """
+    Implements the attention mechanism.
+    """
     def __init__(self, hidden_size):
         super(Attention, self).__init__()
         self.hidden_size = hidden_size
-        # hidden_size*3 is given by the fact that we concatenate the prev_hidden (of size hidden_size)
-        # with the encoder states (of size hidden_size*2 because it's bidirectional)
-        # the output is one because we want to output one value for each word in the batch (attention weight)
-        self.attn = nn.Linear(self.hidden_size*2, 1).to(device)
+        # hidden_size*2 is given by the fact that we concatenate
+        # the prev_hidden (of size hidden_size) with the encoder states
+        self.attn = nn.Linear(self.hidden_size * 2, 1).to(device)
         self.tanh = nn.Tanh().to(device)
-        self.softmax = nn.Softmax(dim=0).to(device)
+        self.softmax = nn.Softmax(dim=1).to(device)
         # init weights
         for _, p in self.state_dict().items():
             nn.init.normal_(p)
 
     def forward(self, prev_hidden, encoder_outputs):
         """
-        This function computes the attention vector which will be used to measure
-        the relevance of different words in the sentence.
+        This function computes the attention weights which will be used by the model
+        to focus more on a specific word in the sequence.
         :param prev_hidden: the previous hiddes state of the decoder (s_t-1)
         :param encoder_outputs: the outputs from the encoder (H)
         :return attention: the vector of shape [seq_len, batch] that contains the probabilities which reflects the
@@ -112,21 +132,21 @@ class Attention(nn.Module):
         """
         # encoder_outputs -> [seq_len, batch, hidden_size*2]
         # prev_hidden -> [seq_len, batch, hidden_size]
-
         # concatenate the previous hidden state and the encoder's output
         input_concat = torch.cat((prev_hidden, encoder_outputs), dim=2)
         # compute the energy values through the 'small' neural network attention.
         energy = self.tanh(self.attn(input_concat))
-        attention = self.softmax(energy)
-        # finally we'd like to append one dimension at the end for later operations.
+        # compute attention weights
+        attention = self.softmax(energy.squeeze(2).t())
         return attention
 
 
-class LuongAttentionDecoder(nn.Module):
-
+class DecoderAttention(nn.Module):
+    """
+    Implements the Decoder with attention mechanism.
+    """
     def __init__(self, embedding_size, hidden_size, voc_len, attention, n_layers=1):
-        super(LuongAttentionDecoder, self).__init__()
-
+        super(DecoderAttention, self).__init__()
         self.embedding = nn.Embedding(voc_len, embedding_size).to(device)
         self.hidden_size = hidden_size
         self.attention = attention
@@ -134,18 +154,18 @@ class LuongAttentionDecoder(nn.Module):
         self.fc_model = nn.Sequential(nn.Linear(hidden_size, hidden_size),
                                       nn.ReLU(),
                                       nn.Linear(hidden_size, voc_len)).to(device)
-        optim_parameters = {'lr': 5e-3, 'weight_decay': 1e-3}
+        optim_parameters = {'lr': 1e-5, 'weight_decay': 1e-5}
         self.optim = Adam(self.parameters(), **optim_parameters)
 
         # init weights
         for _, p in self.state_dict().items():
             nn.init.normal_(p)
 
-
     def forward(self, word, prev_hidden, prev_cell, encoder_outputs):
         """
-        This function realized the attention mechanism applying the Luong et al calculation method.
-        :param word: the word per batch taken in input by the Decoder.
+        Decodes the sequence applying the attention mechanism.
+        :param word: the word per batch taken in input by the Decoder. They can be either generated words or
+        ground truth words depending on the teaching force probability.
         :param prev_hidden: the previous hidden state (s_t-1) of the Decoder
         :param prev_cell: the previous cell state of the Decoder
         :param encoder_outputs: the Encoder's output.
@@ -161,11 +181,10 @@ class LuongAttentionDecoder(nn.Module):
         prev_hidden_repeated = prev_hidden.repeat(encoder_outputs.shape[0], 1, 1)
         # compute the attention values that will specify what part of the input sentence is more relevant
         attention = self.attention(prev_hidden_repeated, encoder_outputs)
-
         # in order to combine the attention weights with the encoder outputs we want to multiply
         # them element wise. To do that we have to adjust the dimensions of those data structures.
         # the multiplication is achieved by the 'torch.bmm' operator. This will output the new context vector.
-        attention = attention.permute(1, 2, 0)  # -> [batch, 1, seq_len]
+        attention = attention.unsqueeze(1)  # -> [batch, 1, seq_len]
         encoder_outputs = encoder_outputs.permute(1, 0, 2)  # -> [batch, seq_len, hidden*2]
         context_vector = torch.bmm(attention, encoder_outputs)  # -> [batch, 1, hidden*2]
         context_vector = context_vector.permute(1, 0, 2)  # -> [1, batch, hidden*2]
@@ -176,7 +195,7 @@ class LuongAttentionDecoder(nn.Module):
         # to get the predictions feed forward pass the outputs from the decoder to a final fully connected layer.
         predictions = self.fc_model(outputs)
         predictions = predictions.squeeze(0)
-
+        # we don't apply Softmax here because it will be applyied by the CrossEntropyLoss class.
         return predictions, prev_cell, prev_cell
 
 
@@ -190,10 +209,6 @@ class ChatbotModel(nn.Module):
         self.attention = with_attention
         self.tf_ratio = tf_ratio
 
-        # init weights
-        for _, p in self.state_dict().items():
-            nn.init.normal_(p)
-
     def forward(self, X, y):
         """
         This function implement the forward method for both the regular Decoder and the
@@ -205,18 +220,22 @@ class ChatbotModel(nn.Module):
         """
         seq_len = y.shape[0]
         batch_size = X.shape[1]
-        batch_history = []
-        # this will store all the outputs for the batches
+        # this will store all the outputs for the batches, shape [seq_len, batch_size, len_vocab]
         outputs = torch.zeros(seq_len, batch_size, self.vocab_size, dtype=torch.float).to(device)
         # compute the hidden and cell state from the encoder
-
         if self.attention:
+            # encode input sequence
             encoder_outputs, h_n, c_n = self.encoder(X)
+            # set the first input to the SOS
             word_t = y[0]
             for t in range(1, seq_len):
+                # decode sequence with attention
                 output, h_n, c_n = self.decoder(word_t, h_n, c_n, encoder_outputs)
+                # store logits
                 outputs[t] = output
+                # pick the best word from the vocabulary for each batch
                 prediction = output.argmax(1)
+                # randomly choose to select the generated word as the next input or the ground truth word.
                 probabilities = [self.tf_ratio, 1 - self.tf_ratio]
                 idx_choice = np.argmax(np.random.multinomial(1, probabilities))
                 if idx_choice == 0:  # choose y[t] as the next word
@@ -224,18 +243,16 @@ class ChatbotModel(nn.Module):
                 else:
                     word_t = prediction
         else:
+            # encode input sequence
             h_n, c_n = self.encoder(X)
-            # initially consider the <S> token for all the batches
+            # set the first input to the SOS
             word_t = y[0]
-            # compute the predictions through the decoder
             for t in range(1, seq_len):
                 # compute output, hidden state and cell state
                 output, h_n, c_n = self.decoder(word_t, h_n, c_n)
                 # update the data structure to hold outputs
                 outputs[t] = output
                 # take the best prediction from the vocabulary.
-                # Since the dimension in (batch_size, len_voc), take the argmax of the second dimension
-                # to get the best prediction for each sentence in the batch.
                 prediction = output.argmax(1)
                 probabilities = [self.tf_ratio, 1 - self.tf_ratio]
                 idx_choice = np.argmax(np.random.multinomial(1, probabilities))
@@ -244,12 +261,14 @@ class ChatbotModel(nn.Module):
                     word_t = y[t]
                 else:
                     word_t = prediction
-
         return outputs
 
 
 class GreedySearch(nn.Module):
-
+    """
+    Implements the evaluator that retrieves the best words from the
+    vocabulary as the user inputs a phrase.
+    """
     def __init__(self, encoder, decoder, voc, attention=True):
         super(GreedySearch, self).__init__()
         self.encoder = encoder
@@ -283,23 +302,17 @@ class GreedySearch(nn.Module):
                 word_t = prediction
                 word_t = word_t.to(device)
         else:
-            h_n, c_n = self.encoder(input_seq[1:])
+            h_n, c_n = self.encoder(input_seq)
             # set the first input word of the decoder as the '<S>' token.
             word_t = self.voc.word_to_idx['<S>']
             word_t = torch.tensor([word_t])
             # compute the predictions through the decoder
             for t in range(1, seq_len):
-                # compute output, hidden state and cell state
                 output, h_n, c_n = self.decoder(word_t, h_n, c_n)
-                # update the data structure to hold outputs
                 outputs[t] = output
-                # take the best prediction from the vocabulary.
-                # Since the dimension in (batch_size, len_voc), take the argmax of the second dimension
-                # to get the best prediction for each sentence in the batch.
                 prediction = output.argmax(1)
                 word_t = prediction
                 word_t = word_t.to(device)
-
         return outputs
 
 

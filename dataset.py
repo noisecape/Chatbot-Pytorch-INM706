@@ -1,8 +1,13 @@
 import torch
 from torch.utils.data import Dataset
-import numpy as np
+
 
 class CornellCorpus(Dataset):
+    """
+    Implements the functionality of the dataset. Inheriths __getitem__ and __len__ from
+    Pytorch's Dataset class. The first inherited function is used to retrieve a datapoint in
+    the dataset at a given index.
+    """
 
     def __init__(self, dialogs, vocabulary, stage='train', split_ratio=[0.8, 0.1, 0.1], max_length=10):
         super(CornellCorpus, self).__init__()
@@ -11,10 +16,16 @@ class CornellCorpus(Dataset):
         self.max_length = max_length
         self.split_ratio = split_ratio
         self.stage = stage
+        # build the dataset splitting the data into training, validation and testing
         self.data = self.build_data()
 
     def build_data(self):
-        # define limit index for splitting
+        """
+        This function builds the dataset by splitting the data into
+        training, validation and testing sets.
+        :return:
+        """
+        # define limit index for each splitting set
         train_limit = int(len(self.dialogs_pair_idx)*self.split_ratio[0])
         val_limit = train_limit + int(len(self.dialogs_pair_idx)*self.split_ratio[1])
         test_limit = int(len(self.dialogs_pair_idx))
@@ -26,16 +37,26 @@ class CornellCorpus(Dataset):
             return self.choose_pairs(val_limit, test_limit)
 
     def choose_pairs(self, start_limit, end_limit):
+        """
+        Splits the data and builds a set from a given range.
+        :param start_limit: the start point by which data are selected
+        :param end_limit: the ending point by which data are selected
+        :return: the set of selected data
+        """
         dataset = []
         for dialog in self.dialogs_pair_idx[start_limit: end_limit]:
             q_a_pair = [self.vocabulary.idx_to_text[dialog[0]], self.vocabulary.idx_to_text[dialog[1]]]
             if q_a_pair[0] != ' ' and q_a_pair[1] != ' ':
                 dataset.append(q_a_pair)
-            else:
-                print('empty')
         return dataset
 
     def pad_sequence(self, sequence):
+        """
+        Insert at the end of the sentence the EOS token and pads the
+        sentence if needed.
+        :param sequence: the sequence to be processed. The sequence is a list of word indices
+        :return:
+        """
         # useful tokens
         pad_token_idx = self.vocabulary.word_to_idx['<PAD>']
         end_token_idx = self.vocabulary.word_to_idx['</S>']
@@ -50,6 +71,11 @@ class CornellCorpus(Dataset):
         return sequence
 
     def check_length_requirement(self, sequence):
+        """
+        Either pads or trunk the sentence and append EOS.
+        :param sequence: the sequence to be processed
+        :return:
+        """
         if len(sequence) < self.max_length:
             # pad sequence and append EOS and S
             return self.pad_sequence(sequence)
