@@ -9,6 +9,7 @@ import torch.nn as nn
 import numpy as np
 import time
 import tkinter as tk
+import matplotlib.pyplot as plt
 from nltk.translate import bleu_score
 
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
@@ -569,6 +570,8 @@ criterion = nn.CrossEntropyLoss(ignore_index=vocabulary.word_to_idx['<PAD>'])
 # init evaluator --> if attention=True, then also the model requires with_attention=True
 searcher = GreedySearch(encoder, decoder, vocabulary, attention=True).to(device)
 
+
+#### LAUNCH GUI ####
 if model_ready():
     # lauch application
     root = tk.Tk()
