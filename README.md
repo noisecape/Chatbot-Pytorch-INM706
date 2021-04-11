@@ -6,7 +6,7 @@ We implemented a Seq2Seq model to build a Chatbot. The model can be downloaded f
 The folder contains also the pretrained model as well as the checkpoints to continue the training phase from epoch 70.
 
 Folder link:
-https://cityuni-my.sharepoint.com/:f:/g/personal/tommaso_capecchi_city_ac_uk/EjdjQxfa9aFBk2pYi_6lTkcB10CEgxshXgrKTjNutuof-w?e=hcTzXS
+https://cityuni-my.sharepoint.com/:f:/g/personal/tommaso_capecchi_city_ac_uk/EjdjQxfa9aFBk2pYi_6lTkcB10CEgxshXgrKTjNutuof-w?e=jEnQvX
 
 In order to properly load the pretrained model, you have to create a folder inside the project root directory named 'saved_models' and drag-and-drop the .pth files inside this directory.
 
