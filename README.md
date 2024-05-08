@@ -1,16 +1,25 @@
-# Chatbot-Pytorch-INM706
-This repository contains the implementation of the final solution for the coursework of Deep Learning for Image Analysis [INM706] at City, University of London.
+# Conversational Chatbot in PyTorch
 
-We implemented a Seq2Seq model to build a Chatbot. The model can be downloaded from this repository and in order to run the Jupyter Notebook and the python files you must use the virtual environment provided in the following folder.
+## Overview
 
-The folder contains also the pretrained model as well as the checkpoints to continue the training phase from epoch 70.
+This project focuses on the development of a conversational chatbot using Sequence to Sequence (Seq2Seq) models in PyTorch, employing techniques such as Long Short-Term Memory (LSTM) cells and the Attention mechanism. The chatbot is designed to interact in a human-like manner, leveraging the Cornell Movie Dialogue Corpus for training.
 
-Folder link:
-https://cityuni-my.sharepoint.com/:f:/g/personal/tommaso_capecchi_city_ac_uk/EjdjQxfa9aFBk2pYi_6lTkcB10CEgxshXgrKTjNutuof-w?e=jEnQvX
+## Key Features
 
-In order to properly load the pretrained model, you have to create a folder inside the project root directory named 'saved_models' and drag-and-drop the .pth files inside this directory.
+- **Seq2Seq Model**: Utilizes LSTM cells to process and generate responses based on learned dialogues from movie scripts.
+- **Attention Mechanism**: Enhances the model's ability to focus on relevant parts of the input sequence, improving response accuracy.
+- **Teacher Forcing Technique**: Speeds up training and helps in converging to a better solution by alternating between predicted and true next words as inputs during training.
 
-We implemented a simple GUI to easily interact with the Chatbot. By default the chatbot is loaded with the model trained with attention. If you wish to interact with the model without no attention you have to initialize the model by setting the property 'with_attention=False' during instantiation. Also you have to initialize the searcher for the evaluation phase with the property 'attention=False'.
+## Experiments and Results
 
-# Launch GUI
-To be able to execute the program and use the GUI you have to run the utils.py file. The GUI should appear immediately. If you stored properly the pretrained files in the corresponding folder, then the model with attention will be loaded and the answer the chatbot will give are output by this model.
+- **Dataset**: Cornell Movie Dialogue Corpus, featuring over 220,000 conversational exchanges.
+- **Training Details**: Model trained using PyTorch with detailed logging of training and validation loss, and employed teacher forcing for efficient learning.
+- **Performance Metrics**: Evaluated using BLEU scores, with detailed results indicating the effectiveness of attention mechanisms in handling long-range dependencies in dialogues.
+
+## Usage
+
+The chatbot is encapsulated in a user-friendly graphical interface, making it accessible for real-time interactions without the need for command-line operations. The GUI is designed with tkinter in Python.
+
+## Conclusion
+
+This project showcases the effectiveness of advanced NLP techniques in creating a responsive and interactive chatbot. While the BLEU score metrics suggest room for improvement, the chatbot demonstrates a solid foundation in understanding and generating human-like conversational responses.
